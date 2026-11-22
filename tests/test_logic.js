@@ -97,5 +97,32 @@ const r7 = SFL.split(u7.join('\n'), 35 * 44, measure, new Set(u7), tr7, d7);
 console.log('ровная разбивка ->', JSON.stringify(r7));
 ok(r7.length === 2 && r7[0] === 'When I finish a line,' && r7[1] === 'the next line slides up.', 'перенос после запятой, строки ровные');
 ok(d7['When I finish a line,'] === 'Когда я дочитываю строку,', 'перевод первой строки собран');
+
+// 8. Английский вместе с русским
+const gem = `2. Действие: Переведи курсор в левую часть экрана к боковому Dock:
+🟢 «I'm moving my cursor to the left side of my Mac screen. Now I'm clicking the icon.»
+(Перевод: Я перемещаю курсор в левую часть экрана Mac. Теперь я нажимаю на значок.)
+4. Действие: Наведи курсор на кнопку Play:
+🟢 «I'm clicking the green Play button.»
+(Перевод: Я нажимаю зелёную кнопку Play.)`;
+const g = SFL.parseMixed(gem);
+console.log('Gemini ->', JSON.stringify(g));
+ok(g && g.length === 2 && g[1].ru === 'Я нажимаю зелёную кнопку Play.', 'формат Gemini: английский получил свой «Перевод»');
+ok(!g.some(x => /Действие|Переведи|Наведи/.test(x.ru || '')), 'строки «Действие» не приняты за перевод');
+const gu = SFL.mixedUnits(g);
+ok(gu.pairs.length === 3 && gu.pairs[1][1] === 'Теперь я нажимаю на значок.', 'два предложения разложены по предложениям');
+const cards = `1. ДЕЙСТВИЕ: Нажать Play.
+RU: Я нажимаю кнопку Play в верхней панели.
+EN: I click the Play button in the top bar.
+2. ДЕЙСТВИЕ: Нажать Stop.
+RU: Я нажимаю Stop.
+EN: I click the Stop button.`;
+const c8 = SFL.parseMixed(cards);
+console.log('карточки ->', JSON.stringify(c8));
+ok(c8 && c8.length === 2 && c8[0].ru === 'Я нажимаю кнопку Play в верхней панели.' && c8[1].ru === 'Я нажимаю Stop.', 'карточки RU/EN: перевод взят из строки «RU:» перед английской');
+const alt = "Hello there.\nПривет.\nI am testing the prompter.\nЯ проверяю суфлёр.";
+const a8 = SFL.parseMixed(alt);
+ok(a8 && a8[0].ru === 'Привет.' && a8[1].ru === 'Я проверяю суфлёр.', 'простое чередование строк');
+ok(SFL.parseMixed("Just English.\nAnother line.") === null, 'чистый английский идёт старым путём');
 console.log(fails ? `\n${fails} проверок не прошло` : '\nВсе проверки прошли');
 process.exit(fails ? 1 : 0);
