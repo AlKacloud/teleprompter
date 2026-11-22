@@ -978,6 +978,8 @@ var SFL = (function () {
     S.gp = 0; setGP(gp, { force: true, instant: true }); repaintSaid(); M.jump(S.gp);
     paintTimer(); setPlayUI(); renderTr();
     setVoice(V.kind ? 'off' : 'unavailable');
+    // Вне Claude переводит Google — разрешения не нужно, поэтому досводим недостающее сразу
+    if (!IN_CLAUDE && missingCount()) translateMissing();
   }
   var fontsReady = document.fonts && document.fonts.load
     ? Promise.race([document.fonts.load('600 40px "Sofia Sans Semi Condensed"'), new Promise(function (r) { setTimeout(r, 1500); })])
