@@ -1042,6 +1042,9 @@ var SFL = (function () {
     return true;
   }
 
+  // Суфлёр уже открыт, а нажали новую ссылку: Safari меняет только «#…», страницу перечитываем сами
+  window.addEventListener('hashchange', function () { if (/^#(s|j)=/.test(location.hash)) location.reload(); });
+
   var fontsReady = document.fonts && document.fonts.load
     ? Promise.race([document.fonts.load('600 40px "Sofia Sans Semi Condensed"'), new Promise(function (r) { setTimeout(r, 1500); })])
     : Promise.resolve();
