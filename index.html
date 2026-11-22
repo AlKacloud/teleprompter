@@ -981,10 +981,57 @@ var SFL = (function () {
     // Вне Claude переводит Google — разрешения не нужно, поэтому досводим недостающее сразу
     if (!IN_CLAUDE && missingCount()) translateMissing();
   }
+  /* ---------- сценарий прямо в ссылке: #s=<сжатый JSON> ----------
+     {"title": "...", "lines": [["English line", "Русский"], ...]}. Часть ссылки после # не уходит на сервер. */
+  function b64urlBytes(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function hashStr(s) {
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return s.length + ':' + (h >>> 0).toString(36);
+  }
+  function readLinkScript() {
+    var m = (location.hash || '').match(/^#(s|j)=([A-Za-z0-9_-]+)$/);
+    if (!m) return Promise.resolve(null);
+    var bytes = b64urlBytes(m[2]);
+    var text = m[1] === 'j' ? Promise.resolve(new TextDecoder().decode(bytes))
+      : window.DecompressionStream
+        ? new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text()
+        : Promise.reject(new Error('no DecompressionStream'));
+    return text.then(function (t) { return { key: hashStr(m[2]), data: JSON.parse(t) }; });
+  }
+  // Загружаем сценарий из ссылки. Та же ссылка второй раз — не сбрасываем место, где остановились.
+  function applyLinkScript(link) {
+    if (!link || !link.data || !Array.isArray(link.data.lines)) return false;
+    if (store.get('link', null) === link.key) return false;
+    var pairs = link.data.lines.filter(function (p) { return p && String(p[0] || '').trim(); });
+    if (!pairs.length) return false;
+    S.source = pairs.map(function (p) { return String(p[0]).trim(); }).join('\n');
+    S.fixed = new Set(pairs.map(function (p) { return String(p[0]).trim(); }));
+    pairs.forEach(function (p) { if (p[1]) S.tr[String(p[0]).trim()] = String(p[1]).trim(); });
+    store.set('source', S.source); store.set('fixed', Array.from(S.fixed)); store.set('tr', S.tr);
+    store.set('pos', null); store.set('link', link.key);
+    TM.acc = 0;
+    return true;
+  }
+
   var fontsReady = document.fonts && document.fonts.load
     ? Promise.race([document.fonts.load('600 40px "Sofia Sans Semi Condensed"'), new Promise(function (r) { setTimeout(r, 1500); })])
     : Promise.resolve();
-  fontsReady.then(start, start);
+  fontsReady.then(null, function () {})
+    .then(function () { return readLinkScript().catch(function () { return { error: true }; }); })
+    .then(function (link) {
+      var fresh = applyLinkScript(link);
+      if (link) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
+      start();
+      if (fresh) note('Сценарий загружен: ' + S.lines.length + ' строк. Нажмите ▶ и читайте.');
+      else if (link && link.error) note('Сценарий из ссылки не прочитался. Обновите iPadOS или откройте ссылку в Safari.');
+    });
 
   // Возможности Claude (внутри артефакта): диктовка, перевод, голос
   var C = window.claude;
