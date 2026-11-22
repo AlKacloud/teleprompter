@@ -735,7 +735,9 @@ var SFL = (function () {
     btn.hidden = c === 'off';
   }
   function translateMissing() {
-    if (T.busy) return;
+    // Перевод уже идёт: запомним, что после него нужно досвести новые строки
+    if (T.busy) { T.again = true; return; }
+    T.again = false;
     var order = [], seen = new Set(), n = S.lines.length, k, i, en;
     for (k = 0; k < n; k++) {
       i = (S.cur + k) % n; en = S.lines[i].en;
@@ -754,6 +756,7 @@ var SFL = (function () {
     };
     Promise.all([work(), work()]).then(function () {
       T.busy = false; saveTr(); S.lines.forEach(paintRu); renderTr();
+      if (T.again && !T.err) translateMissing();
     });
   }
   function trClaude(idx) {
