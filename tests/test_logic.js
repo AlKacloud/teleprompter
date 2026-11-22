@@ -65,5 +65,13 @@ const fixedSrc = "I'm moving my cursor to the top\nof the Logic Pro window";
 const narrow = SFL.split(fixedSrc, 300, measure, new Set(["I'm moving my cursor to the top", 'of the Logic Pro window']));
 ok(narrow.length === 2 && narrow[0] === "I'm moving my cursor to the top", 'строки с переводом остались целыми: ' + JSON.stringify(narrow));
 ok(SFL.split(fixedSrc, 300, measure, null).length > 2, 'обычный текст на узком экране режется как раньше');
+
+// 6. Переносы для чтения вслух: имена не рвутся, строка не кончается на артикль/предлог
+const w22 = s => s.length * 44;   // ~20 символов в строке
+const demo = SFL.split("I'm moving toward the middle section of the Dock and locating the Logic Pro icon. Now I'm clicking the icon to open Logic Pro.", 900, w22);
+console.log('demo ->', JSON.stringify(demo));
+ok(!demo.some((l, i) => i < demo.length - 1 && /\bLogic$/.test(l) && /^Pro\b/.test(demo[i + 1])), '«Logic Pro» не разорвано');
+ok(!demo.some(l => /\b(the|my|to|of|a)$/i.test(l)), 'ни одна строка не кончается на the/my/to/of/a');
+ok(demo.every(l => w22(l) <= 900), 'все строки по-прежнему влезают');
 console.log(fails ? `\n${fails} проверок не прошло` : '\nВсе проверки прошли');
 process.exit(fails ? 1 : 0);

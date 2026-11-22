@@ -237,6 +237,11 @@ var SFL = (function () {
   var CONJ = new Set(['and', 'but', 'or', 'so', 'where', 'which', 'that', 'while', 'because', 'when', 'then', 'to', 'until', 'before', 'after', 'if', 'as']);
   var PREP = new Set(['in', 'on', 'at', 'from', 'into', 'with', 'for', 'of', 'by', 'under', 'over', 'above', 'below', 'beside', 'next', 'onto',
     'across', 'through', 'toward', 'towards', 'between', 'inside', 'around']);
+  // Слова, которыми строка не должна кончаться: читать «...the» и ждать продолжения неудобно
+  var TAILBAD = new Set(['a', 'an', 'the', 'my', 'your', 'its', 'our', 'their', 'his', 'her', 'this', 'these', 'those',
+    'and', 'or', 'but', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'by', 'from', 'into', 'onto', 'i', 'im']);
+  function bare(w) { return String(w).toLowerCase().replace(/[^a-z]/g, ''); }
+  function isCap(w) { return /^[A-Z]/.test(w) && bare(w) !== 'i' && bare(w) !== 'im'; }
 
   // Ключ слова для сверки: строчные буквы и цифры, синонимы и числа словами
   function norm(t) {
@@ -312,6 +317,13 @@ var SFL = (function () {
         nx = cur[j].toLowerCase().replace(/[^a-z']/g, '');
         sc = /[,;:—–]$/.test(cur[j - 1]) ? 3 : CONJ.has(nx) ? 2 : PREP.has(nx) ? 1 : 0;
         if (sc > 0 && sc >= bestScore) { best = j; bestScore = sc; }
+      }
+      // Не рвём имена из заглавных слов (Logic Pro, Open Recent) и не кончаем строку на «the/my/to»
+      var nextWord = function (b) { return b < cur.length ? cur[b] : w; };
+      for (var guard = 0; guard < 3 && best > minKeep; guard++) {
+        var prevW = cur[best - 1];
+        var capPair = isCap(prevW) && isCap(nextWord(best)) && !/[,;:.!?—–]$/.test(prevW);
+        if (capPair || TAILBAD.has(bare(prevW))) best--; else break;
       }
       chunks.push(cur.slice(0, best).join(' '));
       cur = cur.slice(best).concat(w);
