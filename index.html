@@ -1,0 +1,1010 @@
+<title>Голосовой суфлёр</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Semi+Condensed:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: чёрная «сцена» суфлёра на всю ширину, справа узкая панель управления.
+   Текущая строка стоит на ~34% высоты, соседние сильно затемнены. Тема одна, тёмная. */
+:root {
+  color-scheme: dark;
+  --stage: #040705;
+  --rail: #0a110d;
+  --edge: #1a2820;
+  --btn: #111c16;
+  --btn-hi: #1a2b22;
+  --said: #3df27f;
+  --todo: #d6f3e0;
+  --ru-ink: #f4f4f1;
+  --muted: #7d9286;
+  --warn: #ffb44a;
+  --bad: #ff6159;
+  --font-text: "Sofia Sans Semi Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --en: 96px;
+  --ru: 48px;
+}
+[hidden] { display: none !important; }
+html { height: 100%; box-sizing: border-box; }
+*, *::before, *::after { box-sizing: inherit; }
+body { height: 100%; margin: 0; background: var(--stage); color: var(--todo); font-family: var(--font-text); overflow: hidden; -webkit-text-size-adjust: 100%; }
+button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--said); outline-offset: 2px; }
+
+.app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 172px; }
+
+/* ---------- сцена ---------- */
+.stage {
+  position: relative; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; scrollbar-gutter: stable;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px;
+}
+.track { padding-block: 34vh 62vh; user-select: none; -webkit-user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.line {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr); column-gap: 16px; align-items: start;
+  padding-block: 14px; opacity: .13; transition: opacity .35s ease; cursor: pointer;
+}
+.line.d1 { opacity: .3; }
+.line.d0 { opacity: 1; }
+.say {
+  width: 56px; height: 56px; margin-top: max(0px, calc((var(--en) * 1.05 - 56px) / 2));
+  border-radius: 50%; border: 1px solid var(--edge); background: transparent; color: var(--muted);
+  display: grid; place-items: center; cursor: pointer;
+}
+.say svg { width: 26px; height: 26px; }
+.say.on { color: var(--said); border-color: var(--said); }
+.txt { min-width: 0; }
+.en { font-size: var(--en); line-height: 1.05; font-weight: 600; color: var(--todo); overflow-wrap: anywhere; }
+.en .w { transition: color .18s ease; }
+.en .w.said { color: var(--said); }
+.ru { font-size: var(--ru); line-height: 1.2; font-weight: 400; color: var(--ru-ink); margin-top: .16em; min-height: 1.2em; }
+.ru.pending { color: var(--muted); }
+
+/* ---------- панель ---------- */
+.rail {
+  background: var(--rail); border-left: 1px solid var(--edge);
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) 16px 16px;
+  display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-width: 0;
+}
+.timer { font-family: var(--font-num); font-weight: 700; font-size: 34px; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--todo); }
+.timer.ok { color: var(--said); }
+.timer.late { color: var(--warn); }
+.timer.over { color: var(--bad); }
+.limits { font-size: 13px; color: var(--muted); letter-spacing: .02em; margin-top: -4px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn {
+  min-height: 48px; border-radius: 12px; border: 1px solid var(--edge); background: var(--btn);
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 10px;
+  font-size: 17px; font-weight: 600; cursor: pointer;
+}
+.btn:active { background: var(--btn-hi); }
+.btn svg { width: 22px; height: 22px; flex: none; }
+.btn.play { min-height: 60px; background: var(--said); color: #04140a; border-color: transparent; }
+.btn.play.on { background: var(--btn-hi); color: var(--said); border-color: var(--said); }
+.btn.wide { width: 100%; }
+.btn.add { border-color: #2f4a3b; }
+.btn.two { justify-content: flex-start; padding: 6px 10px; text-align: left; line-height: 1.1; }
+.btn.two small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); }
+.note { color: var(--said); min-height: 0; }
+.note:empty { display: none; }
+.card textarea[readonly] { color: var(--muted); }
+.voice { display: grid; grid-template-columns: 10px 1fr; gap: 8px; align-items: start; font-size: 14px; line-height: 1.3; color: var(--muted); }
+.voice .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-top: 4px; }
+.voice.live { color: var(--said); }
+.voice.live .dot { background: var(--said); animation: pulse 1.4s ease-in-out infinite; }
+.voice.warn { color: var(--warn); }
+.voice.warn .dot { background: var(--warn); }
+.voice .re { grid-column: 2; justify-self: start; margin-top: 6px; min-height: 36px; font-size: 14px; }
+.silence { font-family: var(--font-num); font-size: 14px; color: var(--muted); min-height: 18px; font-variant-numeric: tabular-nums; }
+.silence.late { color: var(--warn); }
+.silence.over { color: var(--bad); }
+.sep { height: 1px; background: var(--edge); margin: 2px 0; }
+.foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); line-height: 1.3; }
+.foot .pos { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--todo); }
+.badge { align-self: flex-start; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--warn); border: 1px solid #5a4422; border-radius: 6px; padding: 2px 6px; }
+.trbtn { min-height: 40px; font-size: 15px; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+/* ---------- окно текста ---------- */
+.sheet { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .72); display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.card { width: min(860px, 100%); max-height: 100%; display: flex; flex-direction: column; gap: 12px; background: var(--rail); border: 1px solid var(--edge); border-radius: 16px; padding: 20px; }
+.card h2 { margin: 0; font-size: 24px; font-weight: 700; color: var(--todo); }
+.card p { margin: 0; font-size: 16px; line-height: 1.4; color: var(--muted); max-width: 65ch; }
+.card textarea { width: 100%; min-height: 240px; flex: 1; resize: vertical; border-radius: 10px; border: 1px solid var(--edge); background: var(--stage); color: var(--todo);
+  font: 18px/1.45 var(--font-text); padding: 12px; }
+.card .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.card .count { margin-right: auto; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.btn.primary { background: var(--said); color: #04140a; border-color: transparent; }
+
+@media (max-width: 720px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .stage { padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .rail { border-left: 0; border-top: 1px solid var(--edge); flex-direction: row; flex-wrap: wrap; align-items: center;
+    padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); max-height: 46vh; }
+  .rail > * { flex: 1 1 140px; }
+  .timer { font-size: 28px; }
+  .sep { display: none; }
+  .foot { margin-top: 0; }
+  .line { grid-template-columns: 44px minmax(0, 1fr); column-gap: 10px; }
+  .say { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .line, .en .w { transition: none; }
+  .voice.live .dot { animation: none; }
+}
+</style>
+
+<div class="app">
+  <main class="stage" id="stage" aria-label="Текст суфлёра">
+    <div class="track" id="track"></div>
+  </main>
+
+  <aside class="rail" aria-label="Управление">
+    <div>
+      <div class="timer" id="timer" aria-live="off">00:00</div>
+      <div class="limits">мин 15:00 · макс 50:59</div>
+    </div>
+    <div class="row">
+      <button class="btn play" id="play" type="button" aria-label="Старт">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path id="playIcon" fill="currentColor" d="M7 4.5v15l13-7.5z"/></svg>
+      </button>
+      <button class="btn" id="resetTimer" type="button" aria-label="Сбросить таймер" title="Сбросить таймер">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg>
+      </button>
+    </div>
+    <div class="voice" id="voice"><span class="dot"></span><span id="voiceText">Проверяю микрофон…</span></div>
+    <div class="silence" id="silence"></div>
+    <div class="sep"></div>
+    <button class="btn wide" id="toStart" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M5 4h14M12 20V9m-5 5 5-5 5 5"/></svg>
+      В начало
+    </button>
+    <div class="row">
+      <button class="btn" id="prev" type="button" aria-label="Строка назад">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="m6 15 6-6 6 6"/></svg>
+      </button>
+      <button class="btn" id="next" type="button" aria-label="Строка вперёд">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+      </button>
+    </div>
+    <div class="row">
+      <button class="btn" id="smaller" type="button" aria-label="Мельче">A−</button>
+      <button class="btn" id="bigger" type="button" aria-label="Крупнее">A+</button>
+    </div>
+    <button class="btn wide add" id="add" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+      Текст
+    </button>
+    <button class="btn wide two" id="export" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16 5.5V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h.5"/></svg>
+      <span>Скопировать<small>с переводом</small></span>
+    </button>
+    <div class="foot">
+      <span class="note" id="note" aria-live="polite"></span>
+      <span class="badge" id="demoBadge" hidden>Пример</span>
+      <span class="pos" id="pos">— / —</span>
+      <span id="trText"></span>
+      <button class="btn trbtn" id="trBtn" type="button" hidden>Перевести</button>
+    </div>
+  </aside>
+</div>
+
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="card">
+    <h2 id="sheetTitle">Текст для суфлёра</h2>
+    <p>Вставьте английский текст. Суфлёр сам разобьёт его на строки по ширине экрана и переведёт на русский. Русские строки, номера и эмодзи из подсказок Gemini пропускаются.</p>
+    <textarea id="srcText" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="I'm moving my cursor to the top of the Logic Pro window, where the transport controls are located."></textarea>
+    <div class="acts">
+      <span class="count" id="srcCount"></span>
+      <button class="btn" id="cancelSrc" type="button">Отмена</button>
+      <button class="btn" id="appendSrc" type="button">Добавить в конец</button>
+      <button class="btn primary" id="applySrc" type="button">Загрузить</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="outSheet" hidden role="dialog" aria-modal="true" aria-labelledby="outTitle">
+  <div class="card">
+    <h2 id="outTitle">Текст с переводом</h2>
+    <p>Скопируйте весь текст ниже (он уже выделен) и вставьте его кнопкой «+ Текст» в другой версии суфлёра. Перевод переедет вместе с текстом.</p>
+    <textarea id="outText" readonly spellcheck="false"></textarea>
+    <div class="acts">
+      <button class="btn primary" id="closeOut" type="button">Готово</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ====== PURE-START: чистые функции (разбивка текста и сверка речи), без DOM ====== */
+var SFL = (function () {
+  'use strict';
+  var NUM = { zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', ten: '10',
+    eleven: '11', twelve: '12', thirteen: '13', fourteen: '14', fifteen: '15', sixteen: '16', seventeen: '17', eighteen: '18', nineteen: '19',
+    twenty: '20', thirty: '30', forty: '40', fifty: '50', sixty: '60', seventy: '70', eighty: '80', ninety: '90', hundred: '100' };
+  var SYN = { hertz: 'hz', decibel: 'db', decibels: 'db', okay: 'ok', percent: '%', eq: 'eq', equalizer: 'eq', equaliser: 'eq' };
+  var STOP = new Set(['a', 'an', 'the', 'i', 'im', 'to', 'of', 'in', 'on', 'at', 'and', 'or', 'is', 'it', 'its', 'my', 'me', 'we', 'so', 'as',
+    'be', 'by', 'for', 'this', 'that', 'with', 'you', 'your', 'now', 'then', 'up', 'out', 'here', 'there']);
+  var CONJ = new Set(['and', 'but', 'or', 'so', 'where', 'which', 'that', 'while', 'because', 'when', 'then', 'to', 'until', 'before', 'after', 'if', 'as']);
+  var PREP = new Set(['in', 'on', 'at', 'from', 'into', 'with', 'for', 'of', 'by', 'under', 'over', 'above', 'below', 'beside', 'next', 'onto',
+    'across', 'through', 'toward', 'towards', 'between', 'inside', 'around']);
+
+  // Ключ слова для сверки: строчные буквы и цифры, синонимы и числа словами
+  function norm(t) {
+    var s = String(t).toLowerCase().replace(/[’`]/g, "'").replace(/%/g, ' percent');
+    s = s.replace(/[^a-z0-9]/g, '');
+    if (NUM[s]) return NUM[s];
+    if (SYN[s]) return SYN[s];
+    return s;
+  }
+
+  function lev(a, b) {
+    if (Math.abs(a.length - b.length) > 2) return 9;
+    var prev = [], cur = [], i, j;
+    for (j = 0; j <= b.length; j++) prev[j] = j;
+    for (i = 1; i <= a.length; i++) {
+      cur = [i];
+      for (j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  // Похожи ли слова: точное совпадение, одна-две опечатки распознавания, общий корень
+  function same(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.length < 4 || b.length < 4) return false;
+    var lim = Math.max(a.length, b.length) >= 8 ? 2 : 1;
+    if (lev(a, b) <= lim) return true;
+    if (a.length >= 5 && b.indexOf(a) === 0) return true;
+    if (b.length >= 5 && a.indexOf(b) === 0) return true;
+    return false;
+  }
+
+  // Чистка вставленного текста: убираем русские строки, номера, эмодзи, кавычки-ёлочки
+  function clean(raw) {
+    var out = [];
+    String(raw).replace(/\r/g, '').split('\n').forEach(function (line) {
+      line = line.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
+        .replace(/[«»“”„"]/g, '')
+        .replace(/^\s*(?:\d{1,3}[.)]\s+|[-–—•*]\s+|EN\s*:\s*|ENG\s*:\s*)/i, '')
+        .replace(/\s+/g, ' ').trim();
+      if (!line) { out.push(''); return; }
+      var letters = line.match(/\p{L}/gu) || [];
+      var cyr = line.match(/[Ѐ-ӿ]/g) || [];
+      if (letters.length && cyr.length / letters.length > 0.3) return;
+      out.push(line);
+    });
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  function sentences(line) {
+    var res = [], start = 0, i, c;
+    for (i = 0; i < line.length; i++) {
+      c = line[i];
+      if ((c === '.' || c === '!' || c === '?' || c === '…') && line[i + 1] === ' ' && /[A-Z"'(\[]/.test(line[i + 2] || '')) {
+        res.push(line.slice(start, i + 1).trim()); start = i + 2;
+      }
+    }
+    var tail = line.slice(start).trim();
+    if (tail) res.push(tail);
+    return res;
+  }
+
+  // Разбивка предложения на строки по ширине. Режем по запятой, потом перед союзом, потом перед предлогом.
+  function chunk(sentence, maxW, measure) {
+    var words = sentence.split(/\s+/).filter(Boolean), chunks = [], cur = [];
+    words.forEach(function (w) {
+      var trial = cur.concat(w);
+      if (!cur.length || measure(trial.join(' ')) <= maxW) { cur = trial; return; }
+      var best = cur.length, bestScore = 0, minKeep = Math.max(1, Math.ceil(cur.length * 0.5)), j, sc, nx;
+      for (j = minKeep; j < cur.length; j++) {
+        nx = cur[j].toLowerCase().replace(/[^a-z']/g, '');
+        sc = /[,;:—–]$/.test(cur[j - 1]) ? 3 : CONJ.has(nx) ? 2 : PREP.has(nx) ? 1 : 0;
+        if (sc > 0 && sc >= bestScore) { best = j; bestScore = sc; }
+      }
+      chunks.push(cur.slice(0, best).join(' '));
+      cur = cur.slice(best).concat(w);
+      while (cur.length > 1 && measure(cur.join(' ')) > maxW) {
+        chunks.push(cur.slice(0, cur.length - 1).join(' '));
+        cur = [cur[cur.length - 1]];
+      }
+    });
+    if (cur.length) chunks.push(cur.join(' '));
+    if (chunks.length > 1) {
+      var last = chunks[chunks.length - 1].split(' '), prev = chunks[chunks.length - 2].split(' ');
+      if (last.length === 1 && prev.length >= 3) {
+        var moved = [prev[prev.length - 1]].concat(last).join(' ');
+        if (measure(moved) <= maxW) { chunks[chunks.length - 2] = prev.slice(0, -1).join(' '); chunks[chunks.length - 1] = moved; }
+      }
+    }
+    return chunks;
+  }
+
+  // Весь текст → строки. Перенос строки в исходнике — всегда граница.
+  function split(src, maxW, measure) {
+    var lines = [];
+    String(src).split('\n').forEach(function (para) {
+      para = para.trim();
+      if (!para) return;
+      sentences(para).forEach(function (s) { chunk(s, maxW, measure).forEach(function (c) { lines.push(c); }); });
+    });
+    return lines;
+  }
+
+  /* Сверка речи с текстом. keys — ключи слов сценария; state.gp — следующее слово, которое надо сказать.
+     Частичный результат распознавания может переписываться, поэтому последнее несовпавшее слово не «съедаем». */
+  function Matcher(keys) {
+    this.keys = keys; this.gp = 0; this.used = 0; this.miss = 0; this.lastLen = 0;
+  }
+  Matcher.prototype.find = function (t) {
+    var K = this.keys, k, j;
+    for (k = 0; k < 6; k++) {
+      j = this.gp + k;
+      if (j >= K.length) break;
+      if (k > 1 && STOP.has(t)) break;
+      if (same(t, K[j])) return j;
+    }
+    return -1;
+  };
+  Matcher.prototype.findPair = function (a, b) {
+    var K = this.keys, j;
+    for (j = this.gp; j < Math.min(K.length - 1, this.gp + 40); j++) if (same(a, K[j]) && same(b, K[j + 1])) return j + 1;
+    return -1;
+  };
+  // Возвращает новый gp (или прежний). isFinal — фраза распознана окончательно.
+  Matcher.prototype.feed = function (text, isFinal) {
+    var toks = String(text).split(/\s+/).map(norm).filter(Boolean);
+    if (!isFinal && !toks.length) return this.gp;
+    if (toks.length < this.used) this.used = toks.length;
+    for (var i = this.used; i < toks.length; i++) {
+      var lastPending = i === toks.length - 1 && !isFinal;
+      var j = this.find(toks[i]);
+      if (j >= 0) { this.gp = j + 1; this.used = i + 1; this.miss = 0; continue; }
+      if (lastPending) break;
+      this.miss++;
+      if (this.miss >= 3 && i > 0) {
+        var k = this.findPair(toks[i - 1], toks[i]);
+        if (k >= 0) { this.gp = k + 1; this.miss = 0; }
+      }
+      this.used = i + 1;
+    }
+    this.lastLen = isFinal ? 0 : toks.length;
+    if (isFinal) this.used = 0;
+    return this.gp;
+  };
+  // После ручного перехода: уже сказанное в текущей фразе не применяем повторно
+  Matcher.prototype.jump = function (gp) { this.gp = gp; this.used = this.lastLen; this.miss = 0; };
+
+  /* Перенос перевода между версиями суфлёра: строки вида «English ‖ Русский».
+     Строка-заголовок без «‖» при вставке пропускается. */
+  var SEP = ' ‖ ';
+  function parsePairs(raw) {
+    var pairs = [];
+    String(raw).replace(/\r/g, '').split('\n').forEach(function (l) {
+      var k = l.indexOf('‖');
+      if (k < 1) return;
+      var en = l.slice(0, k).trim(), ru = l.slice(k + 1).trim();
+      if (en) pairs.push([en, ru]);
+    });
+    return pairs.length ? pairs : null;
+  }
+  function pairsText(lines, tr) {
+    return 'Суфлёр: текст с переводом\n' + lines.map(function (en) { return en + SEP + (tr[en] || ''); }).join('\n');
+  }
+
+  return { norm: norm, same: same, clean: clean, sentences: sentences, chunk: chunk, split: split, Matcher: Matcher,
+    parsePairs: parsePairs, pairsText: pairsText };
+})();
+/* ====== PURE-END ====== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem('sfl.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem('sfl.' + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var FONT = '"Sofia Sans Semi Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif';
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Пример: короткие строки-инструкции с готовым переводом
+  var DEMO = [
+    ['Press Play', 'Нажмите Play'],
+    ['and read aloud.', 'и читайте вслух.'],
+    ['Spoken words', 'Сказанные слова'],
+    ['turn green,', 'становятся зелёными,'],
+    ['and the text', 'и текст'],
+    ['slides up.', 'плавно едет вверх.'],
+    ['Tap a line', 'Коснитесь строки,'],
+    ['to jump to it.', 'чтобы перейти к ней.'],
+    ['Tap the screen', 'Касание экрана —'],
+    ['for the next line.', 'следующая строка.'],
+    ['Tap the speaker', 'Кнопка-динамик'],
+    ['to hear a line.', 'читает строку вслух.'],
+    ['Paste your script', 'Свой сценарий'],
+    ['with the plus.', 'вставьте кнопкой «+».']
+  ];
+  var DEMO_SRC = DEMO.map(function (p) { return p[0]; }).join('\n');
+
+  var S = {
+    source: store.get('source', null),
+    enSize: store.get('enSize', 96),
+    tr: store.get('tr', {}),
+    lines: [], words: [], byEn: new Map(),
+    gp: 0, cur: 0, dimmed: [],
+    lastSpeech: 0, ttsBusy: false, colW: 0
+  };
+  DEMO.forEach(function (p) { if (S.tr[p[0]] == null) S.tr[p[0]] = p[1]; });
+
+  var stage = $('#stage'), track = $('#track');
+  var M = new SFL.Matcher([]);
+
+  /* ---------- измерение ширины ---------- */
+  var canvas = document.createElement('canvas'), ctx = canvas.getContext('2d'), mCache = new Map();
+  function measure(text) {
+    var v = mCache.get(text);
+    if (v == null) { v = ctx.measureText(text).width; mCache.set(text, v); }
+    return v;
+  }
+  function enPx() {
+    var w = stage.clientWidth || window.innerWidth;
+    return Math.max(32, Math.min(S.enSize, Math.floor(w / 7)));
+  }
+  function textColumnWidth() {
+    // Пробная строка внутри дорожки: ширина колонки текста ровно такая, как у настоящих строк
+    var probe = document.createElement('div');
+    probe.className = 'line';
+    probe.style.cssText = 'visibility:hidden;height:0;overflow:hidden;padding:0';
+    probe.innerHTML = '<span class="say"></span><div class="txt"><div class="en">x</div></div>';
+    track.appendChild(probe);
+    var w = probe.querySelector('.en').clientWidth;
+    probe.remove();
+    return w;
+  }
+
+  /* ---------- построение строк ---------- */
+  function build() {
+    var px = enPx();
+    document.documentElement.style.setProperty('--en', px + 'px');
+    document.documentElement.style.setProperty('--ru', Math.round(px * 0.5) + 'px');
+    ctx.font = '600 ' + px + 'px ' + FONT;
+    mCache.clear();
+    S.colW = textColumnWidth();
+    var maxW = Math.max(80, S.colW - 8);
+    var src = S.source == null ? DEMO_SRC : S.source;
+    var texts = SFL.split(src, maxW, measure);
+
+    S.lines = []; S.words = []; S.byEn = new Map(); S.dimmed = [];
+    var frag = document.createDocumentFragment();
+    texts.forEach(function (en, i) {
+      var toks = en.split(' ');
+      var ln = { en: en, toks: toks, start: S.words.length, end: S.words.length + toks.length, el: null, ruEl: null };
+      var el = document.createElement('div'); el.className = 'line'; el.dataset.i = i;
+      var say = document.createElement('button'); say.className = 'say'; say.type = 'button'; say.setAttribute('aria-label', 'Прослушать строку');
+      say.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
+      var tx = document.createElement('div'); tx.className = 'txt';
+      var enEl = document.createElement('div'); enEl.className = 'en'; enEl.lang = 'en';
+      toks.forEach(function (t, k) {
+        var sp = document.createElement('span'); sp.className = 'w'; sp.textContent = t;
+        S.words.push({ key: SFL.norm(t), el: sp, line: i });
+        enEl.appendChild(sp);
+        if (k < toks.length - 1) enEl.appendChild(document.createTextNode(' '));
+      });
+      var ru = document.createElement('div'); ru.className = 'ru'; ru.lang = 'ru';
+      tx.appendChild(enEl); tx.appendChild(ru);
+      el.appendChild(say); el.appendChild(tx);
+      ln.el = el; ln.ruEl = ru;
+      S.lines.push(ln);
+      if (!S.byEn.has(en)) S.byEn.set(en, []);
+      S.byEn.get(en).push(i);
+      paintRu(ln);
+      frag.appendChild(el);
+    });
+    track.replaceChildren(frag);
+    M = new SFL.Matcher(S.words.map(function (w) { return w.key; }));
+    $('#demoBadge').hidden = S.source != null;
+  }
+
+  function paintRu(ln) {
+    var ru = S.tr[ln.en];
+    ln.ruEl.textContent = ru == null ? (T.busy ? '…' : '') : ru;
+    ln.ruEl.classList.toggle('pending', ru == null);
+  }
+
+  /* ---------- позиция ---------- */
+  function setGP(g, opts) {
+    opts = opts || {};
+    var W = S.words;
+    g = Math.max(0, Math.min(g, W.length));
+    while (g < W.length && !W[g].key) g++;
+    var a = Math.min(S.gp, g), b = Math.max(S.gp, g), said = g > S.gp;
+    for (var k = a; k < b; k++) W[k].el.classList.toggle('said', said);
+    S.gp = g;
+    var li = g >= W.length ? S.lines.length - 1 : W[g].line;
+    if (li !== S.cur || opts.force) setCur(li, opts);
+    savePos();
+  }
+  function repaintSaid() { S.words.forEach(function (w, k) { w.el.classList.toggle('said', k < S.gp); }); }
+  function setCur(i, opts) {
+    opts = opts || {};
+    S.cur = Math.max(0, Math.min(i, S.lines.length - 1));
+    S.dimmed.forEach(function (el) { el.classList.remove('d0', 'd1'); });
+    S.dimmed = [];
+    var mark = function (j, c) { var ln = S.lines[j]; if (ln) { ln.el.classList.add(c); S.dimmed.push(ln.el); } };
+    mark(S.cur, 'd0'); mark(S.cur - 1, 'd1'); mark(S.cur + 1, 'd1');
+    scrollToLine(S.cur, !opts.instant);
+    $('#pos').textContent = 'Строка ' + (S.cur + 1) + ' / ' + S.lines.length;
+  }
+  function scrollToLine(i, smooth) {
+    var ln = S.lines[i];
+    if (!ln) return;
+    var top = ln.el.offsetTop - stage.clientHeight * 0.34;
+    stage.scrollTo({ top: Math.max(0, top), behavior: smooth && !reduceMotion ? 'smooth' : 'auto' });
+  }
+  function gotoLine(i) {
+    i = Math.max(0, Math.min(i, S.lines.length - 1));
+    setGP(S.lines[i].start, { force: true });
+    M.jump(S.gp);
+  }
+  function next() {
+    if (S.cur >= S.lines.length - 1) { setGP(S.words.length, { force: true }); M.jump(S.gp); return; }
+    gotoLine(S.cur + 1);
+  }
+  var posTimer = 0;
+  function savePos() {
+    clearTimeout(posTimer);
+    posTimer = setTimeout(function () { store.set('pos', { n: S.words.length, gp: S.gp }); }, 400);
+  }
+
+  /* ---------- речь → позиция ---------- */
+  function onSpeech(text, isFinal) {
+    if (S.ttsBusy || !TM.on) return;
+    if (String(text).trim()) S.lastSpeech = performance.now();
+    var before = M.gp;
+    var g = M.feed(text, isFinal);
+    if (g !== before) { setGP(g); M.gp = S.gp; }
+  }
+
+  /* ---------- голос: диктовка Claude или распознавание браузера ---------- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var V = { kind: SR ? 'web' : null, dict: null, rec: null, want: false, state: 'off' };
+  var VOICE_TEXT = {
+    off: 'Голос включится по ▶',
+    starting: 'Включаю микрофон…',
+    listening: 'Слушаю',
+    denied: 'Микрофон здесь недоступен. Касание экрана — следующая строка',
+    unavailable: 'Голос здесь недоступен. Касание экрана — следующая строка',
+    stalled: 'Микрофон выключился',
+    busy: 'Микрофон занят, попробуйте через минуту',
+    micoff: 'Safari не дал микрофон. Разрешите: Настройки → Safari → Микрофон, затем обновите страницу',
+    siri: 'Распознавание речи выключено. Включите Siri и Диктовку в настройках iPad, затем обновите страницу'
+  };
+  var WARN = { denied: 1, unavailable: 1, stalled: 1, busy: 1, micoff: 1, siri: 1 };
+  var IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
+  function setVoice(st) {
+    V.state = st;
+    var box = $('#voice');
+    box.className = 'voice' + (st === 'listening' ? ' live' : WARN[st] ? ' warn' : '');
+    $('#voiceText').textContent = VOICE_TEXT[st] || '';
+    var old = box.querySelector('.re'); if (old) old.remove();
+    if ((st === 'stalled' || st === 'busy') && TM.on) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn re'; b.textContent = 'Включить снова';
+      b.onclick = function () { voiceStart(); };
+      box.appendChild(b);
+    }
+    if (st === 'listening') S.lastSpeech = performance.now();
+  }
+  function voiceStart() {
+    V.want = true;
+    if (V.kind === 'dictation') {
+      setVoice('starting');
+      V.dict.start({ language: 'en' }).catch(function (e) {
+        var c = e && e.code;
+        if (c === 'not_granted') { V.want = false; setVoice('denied'); }
+        else if (c === 'unavailable') { V.want = false; setVoice('unavailable'); }
+        else if (c === 'rate_limited') setVoice('busy');
+        else if (c === 'dismissed' || c === 'stopped') { V.want = false; setVoice('off'); }
+        else setVoice('stalled');
+      });
+    } else if (V.kind === 'web') {
+      startRec();
+    } else {
+      V.want = false; setVoice('unavailable');
+    }
+  }
+  function voiceStop() {
+    V.want = false;
+    if (V.kind === 'dictation' && V.dict) V.dict.stop().catch(function () {});
+    if (V.rec) { try { V.rec.stop(); } catch (e) {} }
+    if (V.state !== 'denied' && V.state !== 'unavailable') setVoice('off');
+  }
+  function startRec() {
+    if (!V.rec) {
+      var r = new SR();
+      r.lang = 'en-US'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+      r.onstart = function () { M.used = 0; M.lastLen = 0; setVoice('listening'); };
+      r.onresult = function (e) {
+        var interim = '';
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          var res = e.results[i];
+          if (res.isFinal) onSpeech(res[0].transcript, true); else interim += res[0].transcript + ' ';
+        }
+        if (interim.trim()) onSpeech(interim, false);
+      };
+      r.onerror = function (e) {
+        if (e.error === 'not-allowed' || e.error === 'audio-capture') {
+          V.want = false; V.kind = null; setVoice(IN_CLAUDE ? 'denied' : 'micoff');
+        } else if (e.error === 'service-not-allowed') {
+          V.want = false; V.kind = null; setVoice(IN_CLAUDE ? 'denied' : 'siri');
+        }
+      };
+      r.onend = function () {
+        if (V.want) {
+          setTimeout(function () {
+            if (!V.want) return;
+            try { r.start(); } catch (err) { setVoice('stalled'); }
+          }, 250);
+        } else if (V.state === 'listening' || V.state === 'starting') setVoice('off');
+      };
+      V.rec = r;
+    }
+    setVoice('starting');
+    try { V.rec.start(); } catch (e) { /* уже слушает */ }
+  }
+
+  /* ---------- озвучка строки ---------- */
+  var voicesEn = null;
+  function pickVoice() {
+    if (!window.speechSynthesis) return null;
+    var all = speechSynthesis.getVoices() || [];
+    var en = all.filter(function (v) { return /^en[-_]US/i.test(v.lang); });
+    if (!en.length) en = all.filter(function (v) { return /^en/i.test(v.lang); });
+    var pref = ['Samantha', 'Ava', 'Allison', 'Alex', 'Google US English', 'Microsoft Aria', 'Microsoft Jenny'];
+    for (var p = 0; p < pref.length; p++) for (var i = 0; i < en.length; i++) if (en[i].name.indexOf(pref[p]) === 0) return en[i];
+    return en[0] || null;
+  }
+  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = function () { voicesEn = pickVoice(); };
+  var speakingBtn = null;
+  function speak(text, btn) {
+    if (speakingBtn) speakingBtn.classList.remove('on');
+    if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+      speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-US'; u.rate = 0.92;
+      var v = voicesEn || pickVoice(); if (v) u.voice = v;
+      u.onstart = function () { S.ttsBusy = true; btn.classList.add('on'); speakingBtn = btn; };
+      u.onend = u.onerror = function () { btn.classList.remove('on'); setTimeout(function () { S.ttsBusy = false; }, 400); };
+      speechSynthesis.speak(u);
+      return;
+    }
+    if (T.tts) {
+      S.ttsBusy = true; btn.classList.add('on'); speakingBtn = btn;
+      T.tts.speak(text, { language: 'en' }).catch(function () {}).then(function () {
+        btn.classList.remove('on'); setTimeout(function () { S.ttsBusy = false; }, 400);
+      });
+    }
+  }
+
+  /* ---------- перевод: Claude, а вне Claude — Google, потом MyMemory ---------- */
+  var T = { sample: null, tts: null, busy: false, err: null, granted: false };
+  var BATCH = 40;
+  function missingCount() { var n = 0; S.byEn.forEach(function (_, en) { if (S.tr[en] == null) n++; }); return n; }
+  function applyTr(en, ru) {
+    if (!ru) return;
+    S.tr[en] = ru;
+    (S.byEn.get(en) || []).forEach(function (i) { paintRu(S.lines[i]); });
+  }
+  var trSaveTimer = 0;
+  function saveTr() {
+    clearTimeout(trSaveTimer);
+    trSaveTimer = setTimeout(function () {
+      var keys = Object.keys(S.tr);
+      if (keys.length > 6000) keys.slice(0, keys.length - 6000).forEach(function (k) { delete S.tr[k]; });
+      store.set('tr', S.tr);
+    }, 600);
+  }
+  function renderTr() {
+    var miss = missingCount(), total = S.byEn.size, txt = $('#trText'), btn = $('#trBtn');
+    btn.hidden = true;
+    if (T.busy) { txt.textContent = 'Перевожу… ' + (total - miss) + ' из ' + total; return; }
+    if (!miss) { txt.textContent = total ? 'Перевод готов' : ''; return; }
+    var c = T.err && T.err.code;
+    txt.textContent = c === 'rate_limited' ? 'Claude просит подождать. Без перевода: ' + miss
+      : c === 'off' ? 'Перевод через Claude не разрешён. Без перевода: ' + miss
+      : c === 'net' ? 'Нет связи с переводчиком. Без перевода: ' + miss
+      : 'Без перевода: ' + miss;
+    btn.hidden = c === 'off';
+  }
+  function translateMissing() {
+    if (T.busy) return;
+    var order = [], seen = new Set(), n = S.lines.length, k, i, en;
+    for (k = 0; k < n; k++) {
+      i = (S.cur + k) % n; en = S.lines[i].en;
+      if (S.tr[en] == null && !seen.has(en)) { seen.add(en); order.push(i); }
+    }
+    if (!order.length) { renderTr(); return; }
+    var batches = [];
+    for (k = 0; k < order.length; k += BATCH) batches.push(order.slice(k, k + BATCH));
+    T.busy = true; T.err = null;
+    S.lines.forEach(paintRu); renderTr();
+    var next = 0;
+    var work = function () {
+      if (next >= batches.length || T.err) return Promise.resolve();
+      var b = batches[next++];
+      return (T.sample ? trClaude(b) : trWeb(b)).then(function () { renderTr(); return work(); }, function (e) { T.err = e || { code: 'error' }; });
+    };
+    Promise.all([work(), work()]).then(function () {
+      T.busy = false; saveTr(); S.lines.forEach(paintRu); renderTr();
+    });
+  }
+  function trClaude(idx) {
+    var ens = idx.map(function (i) { return S.lines[i].en; });
+    var lo = Math.min.apply(null, idx), hi = Math.max.apply(null, idx);
+    var before = S.lines.slice(Math.max(0, lo - 3), lo).map(function (l) { return l.en; });
+    var after = S.lines.slice(hi + 1, hi + 4).map(function (l) { return l.en; });
+    var prompt = 'Translate lines of an English voice-over script into Russian.\n'
+      + 'The reader is a Russian-speaking music producer who reads the English aloud from a teleprompter and glances at the Russian only to understand the meaning.\n'
+      + 'Rules:\n'
+      + '- Each line is often a fragment of a longer sentence. Use the neighbouring lines for context, but translate only what is in each line.\n'
+      + '- Keep names of software, menus, buttons, plugins and parameters in English exactly as written (for example Logic Pro, Piano Roll, Channel EQ, Play, Bounce, Library, Inspector).\n'
+      + '- Plain, short, natural Russian. No comments, no transliteration.\n'
+      + 'Context before (do not translate): ' + JSON.stringify(before) + '\n'
+      + 'Context after (do not translate): ' + JSON.stringify(after) + '\n'
+      + 'Lines to translate (' + ens.length + '): ' + JSON.stringify(ens) + '\n'
+      + 'Reply with only a JSON array of exactly ' + ens.length + ' Russian strings, in the same order.';
+    return T.sample.json(prompt, { modelTier: 'quick' }).then(function (out) {
+      if (!Array.isArray(out) || out.length !== ens.length) throw { code: 'mismatch' };
+      T.granted = true;
+      ens.forEach(function (en, k) { applyTr(en, String(out[k] == null ? '' : out[k]).trim()); });
+    }, function (e) {
+      var c = e && e.code;
+      if (c === 'not_granted' || c === 'sampling_disabled' || c === 'not_declared' || c === 'capability_disabled' || c === 'capability_removed') throw { code: 'off' };
+      throw { code: c || 'error' };
+    });
+  }
+  function trWeb(idx) {
+    var ens = idx.map(function (i) { return S.lines[i].en; }), p = 0;
+    var one = function (en) {
+      return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=' + encodeURIComponent(en))
+        .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+        .then(function (j) { return j[0].map(function (x) { return x[0]; }).join(''); })
+        .catch(function () {
+          return fetch('https://api.mymemory.translated.net/get?langpair=en|ru&q=' + encodeURIComponent(en))
+            .then(function (r) { return r.json(); })
+            .then(function (j) { if (!j || j.responseStatus !== 200) throw 0; return j.responseData.translatedText; });
+        })
+        .then(function (ru) { applyTr(en, ru); }, function () { throw { code: 'net' }; });
+    };
+    var lane = function () { if (p >= ens.length) return Promise.resolve(); var en = ens[p++]; return one(en).then(lane); };
+    return Promise.all([lane(), lane(), lane()]);
+  }
+
+  /* ---------- таймер ---------- */
+  var TM = { acc: 0, t0: 0, on: false, iv: 0 };
+  function elapsed() { return TM.acc + (TM.on ? performance.now() - TM.t0 : 0); }
+  function fmt(ms) {
+    var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    var mm = (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0'));
+    return mm + ':' + String(ss).padStart(2, '0');
+  }
+  function paintTimer() {
+    var ms = elapsed(), el = $('#timer');
+    el.textContent = fmt(ms);
+    el.className = 'timer' + (ms >= 50 * 60000 ? ' over' : ms >= 45 * 60000 ? ' late' : ms >= 15 * 60000 ? ' ok' : '');
+  }
+  function tick() {
+    paintTimer();
+    var sil = $('#silence');
+    if (TM.on && V.state === 'listening') {
+      var now = performance.now(), quiet = (now - S.lastSpeech) / 1000;
+      sil.textContent = quiet >= 5 ? 'тишина ' + Math.floor(quiet) + ' с' : '';
+      sil.className = 'silence' + (quiet >= 15 ? ' over' : quiet >= 10 ? ' late' : '');
+      // Последнее слово строки не расслышано, а речь смолкла — считаем строку прочитанной
+      var ln = S.lines[S.cur];
+      if (ln && !S.ttsBusy) {
+        var left = ln.end - S.gp;
+        if (ln.toks.length >= 3 && S.gp > ln.start && left === 1 && now - S.lastSpeech > 1100) { setGP(ln.end); M.jump(S.gp); }
+      }
+    } else { sil.textContent = ''; }
+  }
+  var WL = null;
+  function wakeOn() {
+    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (l) { WL = l; }, function () {}); } catch (e) {}
+  }
+  function wakeOff() { try { if (WL) WL.release(); } catch (e) {} WL = null; }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && TM.on) wakeOn(); });
+
+  function setPlayUI() {
+    var b = $('#play');
+    b.classList.toggle('on', TM.on);
+    b.setAttribute('aria-label', TM.on ? 'Пауза' : 'Старт');
+    $('#playIcon').setAttribute('d', TM.on ? 'M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z' : 'M7 4.5v15l13-7.5z');
+  }
+  function play() {
+    voiceStart();                      // первым делом и синхронно: диктовке нужен жест пользователя
+    TM.t0 = performance.now(); TM.on = true;
+    clearInterval(TM.iv); TM.iv = setInterval(tick, 250);
+    wakeOn(); setPlayUI(); setCur(S.cur); tick();
+  }
+  function pause() {
+    TM.acc = elapsed(); TM.on = false;
+    clearInterval(TM.iv);
+    voiceStop(); wakeOff(); setPlayUI(); tick();
+  }
+
+  /* ---------- окно текста ---------- */
+  function openSheet() {
+    $('#sheet').hidden = false;
+    var ta = $('#srcText'); ta.value = ''; countSrc();
+    setTimeout(function () { ta.focus(); }, 50);
+  }
+  function closeSheet() { $('#sheet').hidden = true; }
+  function countSrc() {
+    var raw = $('#srcText').value, pairs = SFL.parsePairs(raw);
+    if (pairs) { $('#srcCount').textContent = pairs.length + ' строк с переводом'; return; }
+    var t = SFL.clean(raw), n = t ? t.split(/\s+/).length : 0;
+    $('#srcCount').textContent = n ? n + ' слов' : '';
+  }
+  function loadText(append) {
+    var raw = $('#srcText').value, pairs = SFL.parsePairs(raw);
+    var t = pairs ? pairs.map(function (p) { return p[0]; }).join('\n') : SFL.clean(raw);
+    if (!t) { closeSheet(); return; }
+    // Текст из другой версии суфлёра приходит с готовым переводом
+    if (pairs) { pairs.forEach(function (p) { if (p[1]) S.tr[p[0]] = p[1]; }); saveTr(); }
+    var keepGp = append ? S.gp : 0;
+    S.source = append && S.source ? S.source + '\n' + t : t;
+    store.set('source', S.source);
+    closeSheet();
+    build();
+    S.gp = 0; setGP(keepGp, { force: true, instant: true }); repaintSaid(); M.jump(S.gp);
+    translateMissing();
+  }
+
+  /* ---------- перенос текста с переводом в другую версию ---------- */
+  var noteTimer = 0;
+  function note(msg) {
+    var n = $('#note'); n.textContent = msg;
+    clearTimeout(noteTimer); noteTimer = setTimeout(function () { n.textContent = ''; }, 6000);
+  }
+  function showOut(text) {
+    $('#outSheet').hidden = false;
+    var ta = $('#outText'); ta.value = text;
+    setTimeout(function () { ta.focus(); ta.select(); try { ta.setSelectionRange(0, text.length); } catch (e) {} }, 50);
+  }
+  function exportPairs() {
+    var text = SFL.pairsText(S.lines.map(function (l) { return l.en; }), S.tr);
+    var miss = missingCount();
+    var done = function () { note('Скопировано строк: ' + S.lines.length + (miss ? '. Без перевода: ' + miss : '') + '. Вставьте кнопкой «+ Текст» в другой версии.'); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { showOut(text); });
+        return;
+      }
+    } catch (e) {}
+    showOut(text);
+  }
+
+  /* ---------- события ---------- */
+  $('#export').onclick = exportPairs;
+  $('#closeOut').onclick = function () { $('#outSheet').hidden = true; };
+  $('#outSheet').addEventListener('click', function (e) { if (e.target.id === 'outSheet') $('#outSheet').hidden = true; });
+  track.addEventListener('click', function (e) {
+    var sayBtn = e.target.closest('.say');
+    if (sayBtn) { speak(S.lines[+sayBtn.closest('.line').dataset.i].en, sayBtn); return; }
+    var lineEl = e.target.closest('.line');
+    if (lineEl) { var i = +lineEl.dataset.i; if (i === S.cur) next(); else gotoLine(i); return; }
+    next();
+  });
+  $('#play').onclick = function () { if (TM.on) pause(); else play(); };
+  $('#resetTimer').onclick = function () { if (TM.on) pause(); TM.acc = 0; paintTimer(); };
+  $('#toStart').onclick = function () { gotoLine(0); };
+  $('#prev').onclick = function () { gotoLine(S.cur - 1); };
+  $('#next').onclick = function () { next(); };
+  $('#smaller').onclick = function () { resize(S.enSize - 8); };
+  $('#bigger').onclick = function () { resize(S.enSize + 8); };
+  $('#add').onclick = openSheet;
+  $('#cancelSrc').onclick = closeSheet;
+  $('#applySrc').onclick = function () { loadText(false); };
+  $('#appendSrc').onclick = function () { loadText(true); };
+  $('#srcText').addEventListener('input', countSrc);
+  $('#sheet').addEventListener('click', function (e) { if (e.target.id === 'sheet') closeSheet(); });
+  $('#trBtn').onclick = function () { translateMissing(); };
+  document.addEventListener('keydown', function (e) {
+    if (!$('#sheet').hidden || !$('#outSheet').hidden) {
+      if (e.key === 'Escape') { closeSheet(); $('#outSheet').hidden = true; }
+      return;
+    }
+    var tag = e.target && e.target.tagName;
+    if (tag === 'TEXTAREA') return;
+    if (tag === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
+    if (e.key === ' ' || e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); gotoLine(S.cur - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (TM.on) pause(); else play(); }
+  });
+
+  function resize(px) {
+    S.enSize = Math.max(48, Math.min(160, px));
+    store.set('enSize', S.enSize);
+    rebuildKeep();
+    if (missingCount()) translateMissing();
+  }
+  function rebuildKeep() {
+    var gp = S.gp;
+    build();
+    S.gp = 0; setGP(gp, { force: true, instant: true }); repaintSaid(); M.jump(S.gp);
+    renderTr();
+  }
+  var roTimer = 0, started = false;
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () {
+      clearTimeout(roTimer);
+      roTimer = setTimeout(function () {
+        if (!started) return;
+        var w = textColumnWidth();
+        if (w < 60) return;   // окно ещё не развернулось: ждём настоящую ширину
+        // Перестраиваем, если раньше строили «вслепую» (ширина была нулевой) или ширина заметно изменилась
+        if (S.colW < 60 || Math.abs(w - S.colW) / S.colW > 0.06) {
+          rebuildKeep();
+          if (missingCount() && (T.granted || !T.sample)) translateMissing();
+        }
+      }, 200);
+    }).observe(stage);
+  }
+
+  /* ---------- старт ---------- */
+  function start() {
+    started = true;
+    build();
+    var saved = store.get('pos', null);
+    var gp = saved && saved.n === S.words.length ? saved.gp : 0;
+    S.gp = 0; setGP(gp, { force: true, instant: true }); repaintSaid(); M.jump(S.gp);
+    paintTimer(); setPlayUI(); renderTr();
+    setVoice(V.kind ? 'off' : 'unavailable');
+  }
+  var fontsReady = document.fonts && document.fonts.load
+    ? Promise.race([document.fonts.load('600 40px "Sofia Sans Semi Condensed"'), new Promise(function (r) { setTimeout(r, 1500); })])
+    : Promise.resolve();
+  fontsReady.then(start, start);
+
+  // Возможности Claude (внутри артефакта): диктовка, перевод, голос
+  var C = window.claude;
+  if (C && typeof C.use === 'function') {
+    Promise.all([
+      C.use('dictation').catch(function () { return null; }),
+      C.use('sample').catch(function () { return null; }),
+      C.use('tts').catch(function () { return null; })
+    ]).then(function (r) {
+      T.sample = r[1]; T.tts = r[2];
+      if (r[0]) {
+        V.dict = r[0]; V.kind = 'dictation';
+        V.dict.onPartial(function (e) { onSpeech(e.text, false); });
+        V.dict.onFinal(function (e) { onSpeech(e.text, true); });
+        V.dict.onState(function (e) {
+          if (e.state === 'listening') setVoice('listening');
+          else if (e.state === 'starting') setVoice('starting');
+          else if (e.state === 'idle') {
+            M.used = 0; M.lastLen = 0;
+            var why = e.reason;
+            if (why === 'stopped') { if (V.state !== 'denied') setVoice('off'); }
+            else if (why === 'viewer_stopped') { V.want = false; setVoice('off'); }
+            else if (why === 'not_granted') { V.want = false; setVoice('denied'); }
+            else if (why === 'unavailable') { V.want = false; setVoice('unavailable'); }
+            else if (why === 'rate_limited') setVoice('busy');
+            else if (V.want) setVoice('stalled');
+            else setVoice('off');
+          }
+        });
+        if (V.state === 'unavailable' || V.state === 'off') setVoice('off');
+      }
+      renderTr();
+    });
+  }
+
+  // Для проверки из консоли
+  window.__sfl = { S: S, feed: function (t, f) { onSpeech(t, f); }, play: play, pause: pause };
+})();
+</script>
