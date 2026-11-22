@@ -352,32 +352,50 @@ var SFL = (function () {
      Рвём только на стыке кусков и никогда через конец предложения.
      Перевод склеенной строки = переводы кусков подряд, кладём его в derived. */
   var SENT_END = /[.!?…]["'”»)\]]?$/;
+
+  /* Как разложить куски одного предложения по строкам: сначала как можно меньше строк,
+     среди таких — самые ровные по длине, и лучше рвать после запятой.
+     Например «When I finish a line, / the next line slides up.», а не «...the next line / slides up.» */
+  function bestGroups(ws, maxW, measure) {
+    var n = ws.length, best = [0], prev = [-1], i, j;
+    for (j = 1; j <= n; j++) {
+      best[j] = Infinity; prev[j] = j - 1;
+      for (i = j - 1; i >= 0; i--) {
+        var w = measure(ws.slice(i, j).join(' '));
+        if (w > maxW && j - i > 1) break;          // левее будет только шире
+        var slack = Math.max(0, maxW - w) / maxW;
+        var cost = 1e6 + slack * slack * 1000;     // строка «дорогая»: меньше строк — лучше
+        if (j < n && /[,;:—–]$/.test(ws[j - 1])) cost -= 200;
+        if (best[i] + cost < best[j]) { best[j] = best[i] + cost; prev[j] = i; }
+      }
+    }
+    var groups = [];
+    for (j = n; j > 0; j = prev[j]) groups.unshift([prev[j], j]);
+    return groups;
+  }
+
   function packUnits(units, maxW, measure, tr, derived) {
     var out = [], sent = [];
+    function ruOf(u) { return tr && tr[u] != null ? tr[u] : derived ? derived[u] : null; }
     function addLine(parts) {
       var en = parts.join(' ');
-      if (parts.length > 1 && tr && derived) {
-        var rus = parts.map(function (u) { return tr[u]; });
-        if (rus.every(function (r) { return r != null && r !== ''; })) derived[en] = rus.join(' ');
+      if (parts.length > 1 && derived) {
+        var rus = parts.map(ruOf);
+        if (rus.every(function (r) { return r != null; })) derived[en] = rus.filter(Boolean).join(' ');
       }
       out.push(en);
     }
     function flushSentence() {
-      var line = [];
+      var ws = [];
       sent.forEach(function (u) {
-        if (measure(u) > maxW) {
-          // Кусок шире строки (очень крупный шрифт): режем по словам, перевод — под первой частью
-          if (line.length) { addLine(line); line = []; }
-          chunk(u, maxW, measure).forEach(function (p, k) {
-            out.push(p);
-            if (derived && p !== u) derived[p] = k === 0 && tr && tr[u] != null ? tr[u] : '';
-          });
-          return;
-        }
-        if (line.length && measure(line.concat(u).join(' ')) > maxW) { addLine(line); line = []; }
-        line.push(u);
+        if (measure(u) <= maxW) { ws.push(u); return; }
+        // Кусок шире строки (очень крупный шрифт): режем по словам, перевод — под первой частью
+        chunk(u, maxW, measure).forEach(function (p, k) {
+          ws.push(p);
+          if (derived && p !== u) derived[p] = k === 0 && ruOf(u) != null ? ruOf(u) : '';
+        });
       });
-      if (line.length) addLine(line);
+      bestGroups(ws, maxW, measure).forEach(function (g) { addLine(ws.slice(g[0], g[1])); });
       sent = [];
     }
     units.forEach(function (u) { sent.push(u); if (SENT_END.test(u)) flushSentence(); });

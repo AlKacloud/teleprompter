@@ -88,5 +88,14 @@ console.log('demo ->', JSON.stringify(demo));
 ok(!demo.some((l, i) => i < demo.length - 1 && /\bLogic$/.test(l) && /^Pro\b/.test(demo[i + 1])), '«Logic Pro» не разорвано');
 ok(!demo.some(l => /\b(the|my|to|of|a)$/i.test(l)), 'ни одна строка не кончается на the/my/to/of/a');
 ok(demo.every(l => w22(l) <= 900), 'все строки по-прежнему влезают');
+
+// 7. Ровная разбивка: то же число строк, но перенос после запятой
+const u7 = ['When I finish', 'a line,', 'the next line', 'slides up.'];
+const tr7 = { 'When I finish': 'Когда я дочитываю', 'a line,': 'строку,', 'the next line': 'следующая строка', 'slides up.': 'плавно поднимается.' };
+const d7 = {};
+const r7 = SFL.split(u7.join('\n'), 35 * 44, measure, new Set(u7), tr7, d7);
+console.log('ровная разбивка ->', JSON.stringify(r7));
+ok(r7.length === 2 && r7[0] === 'When I finish a line,' && r7[1] === 'the next line slides up.', 'перенос после запятой, строки ровные');
+ok(d7['When I finish a line,'] === 'Когда я дочитываю строку,', 'перевод первой строки собран');
 console.log(fails ? `\n${fails} проверок не прошло` : '\nВсе проверки прошли');
 process.exit(fails ? 1 : 0);
