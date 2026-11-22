@@ -107,6 +107,9 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--said); o
 .silence { font-family: var(--font-num); font-size: 14px; color: var(--muted); min-height: 18px; font-variant-numeric: tabular-nums; }
 .silence.late { color: var(--warn); }
 .silence.over { color: var(--bad); }
+.heard { font-size: 13px; line-height: 1.3; color: var(--muted); max-height: 5.2em; overflow: hidden; overflow-wrap: anywhere; }
+.heard:empty { display: none; }
+.heard.err { color: var(--warn); }
 .sep { height: 1px; background: var(--edge); margin: 2px 0; }
 .foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); line-height: 1.3; }
 .foot .pos { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--todo); }
@@ -165,6 +168,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--said); o
     </div>
     <div class="voice" id="voice"><span class="dot"></span><span id="voiceText">Проверяю микрофон…</span></div>
     <div class="silence" id="silence"></div>
+    <div class="heard" id="heard" aria-live="off"></div>
     <div class="sep"></div>
     <button class="btn wide" id="toStart" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M5 4h14M12 20V9m-5 5 5-5 5 5"/></svg>
@@ -661,8 +665,20 @@ var SFL = (function () {
     posTimer = setTimeout(function () { store.set('pos', { n: S.words.length, gp: S.gp }); }, 400);
   }
 
+  /* ---------- что слышит распознавание: видно под «Слушаю» ---------- */
+  function showHeard(text, err) {
+    var h = $('#heard');
+    if (err) { h.classList.add('err'); h.textContent = err; return; }
+    if (!text || !String(text).trim()) return;
+    h.classList.remove('err');
+    h.textContent = 'Слышу: ' + String(text).trim().slice(-70);
+  }
+  function clearHeard() { var h = $('#heard'); h.textContent = ''; h.classList.remove('err'); }
+
   /* ---------- речь → позиция ---------- */
   function onSpeech(text, isFinal) {
+    // Озвучка строки «залипла» (iPad не прислал конец): если она уже не звучит — снова слушаем
+    if (S.ttsBusy && !(window.speechSynthesis && speechSynthesis.speaking)) S.ttsBusy = false;
     if (S.ttsBusy || !TM.on) return;
     if (String(text).trim()) S.lastSpeech = performance.now();
     var before = M.gp;
@@ -730,16 +746,18 @@ var SFL = (function () {
     r.lang = 'en-US'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
     r.onstart = function () {
       if (r !== V.rec) return;
-      V.started = true; clearTimeout(V.watch);
+      V.started = true; V.live = true; clearTimeout(V.watch);
       M.used = 0; M.lastLen = 0; setVoice('listening');
     };
     r.onresult = function (e) {
       if (r !== V.rec) return;
-      var interim = '';
+      var interim = '', last = '';
       for (var i = e.resultIndex; i < e.results.length; i++) {
         var res = e.results[i];
+        last = res[0].transcript;
         if (res.isFinal) onSpeech(res[0].transcript, true); else interim += res[0].transcript + ' ';
       }
+      showHeard(last);
       if (interim.trim()) onSpeech(interim, false);
     };
     r.onerror = function (e) {
@@ -748,10 +766,13 @@ var SFL = (function () {
         V.want = false; V.kind = IN_CLAUDE ? null : V.kind; setVoice(IN_CLAUDE ? 'denied' : 'micoff');
       } else if (e.error === 'service-not-allowed') {
         V.want = false; setVoice(IN_CLAUDE ? 'denied' : 'siri');
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        showHeard('', 'ошибка распознавания: ' + e.error);
       }
     };
     r.onend = function () {
       if (r !== V.rec) return;
+      V.live = false;
       // Safari сам закрывает сеанс после паузы в речи — продолжаем новым сеансом
       if (V.want) setTimeout(function () { if (V.want && r === V.rec) restartRec(false); }, 200);
       else if (V.state === 'listening' || V.state === 'starting') setVoice('off');
@@ -760,7 +781,15 @@ var SFL = (function () {
   }
   function restartRec(fromGesture) {
     var old = V.rec;
-    V.rec = newRec(); V.started = false;
+    // На iPad микрофон один: живой сеанс сначала закрываем, новый запустит его onend
+    if (old && V.live) {
+      try { old.stop(); } catch (e) {}
+      setTimeout(function () {   // не закрылся за 1,2 с — обрываем и начинаем заново
+        if (V.want && V.rec === old && V.live) { V.live = false; restartRec(false); }
+      }, 1200);
+      return;
+    }
+    V.rec = newRec(); V.started = false; V.live = false;
     if (old) { try { old.abort(); } catch (e) {} }
     if (fromGesture) setVoice('starting');
     // Сторож: если за 2,5 с сеанс не начался — честно говорим, что микрофон выключился
@@ -943,6 +972,7 @@ var SFL = (function () {
   }
   function play() {
     voiceStart();                      // первым делом и синхронно: диктовке нужен жест пользователя
+    S.ttsBusy = false; clearHeard();
     TM.t0 = performance.now(); TM.on = true;
     clearInterval(TM.iv); TM.iv = setInterval(tick, 250);
     wakeOn(); setPlayUI(); setCur(S.cur); tick();
@@ -1027,13 +1057,14 @@ var SFL = (function () {
   });
   $('#play').onclick = function () { if (TM.on) pause(); else play(); };
   // «Заново»: таймер на ноль, текст в начало; если запись шла — слушаем дальше новым сеансом
+  // Микрофон трогаем, только если он не слушает: живой сеанс обрывать нельзя, на iPad это его «оглушает»
   $('#resetTimer').onclick = function () {
     TM.acc = 0; TM.t0 = performance.now();
     gotoLine(0);
-    if (TM.on) voiceStart();
+    if (TM.on && V.state !== 'listening') voiceStart();
     paintTimer(); tick();
   };
-  $('#toStart').onclick = function () { gotoLine(0); if (TM.on) voiceStart(); };
+  $('#toStart').onclick = function () { gotoLine(0); if (TM.on && V.state !== 'listening') voiceStart(); };
   $('#prev').onclick = function () { gotoLine(S.cur - 1); };
   $('#next').onclick = function () { next(); };
   $('#smaller').onclick = function () { resize(S.enSize - 8); };
@@ -1166,8 +1197,8 @@ var SFL = (function () {
       T.sample = r[1]; T.tts = r[2];
       if (r[0]) {
         V.dict = r[0]; V.kind = 'dictation';
-        V.dict.onPartial(function (e) { onSpeech(e.text, false); });
-        V.dict.onFinal(function (e) { onSpeech(e.text, true); });
+        V.dict.onPartial(function (e) { showHeard(e.text); onSpeech(e.text, false); });
+        V.dict.onFinal(function (e) { showHeard(e.text); onSpeech(e.text, true); });
         V.dict.onState(function (e) {
           if (e.state === 'listening') setVoice('listening');
           else if (e.state === 'starting') setVoice('starting');
