@@ -60,12 +60,27 @@ ok(back[0][0] === "I'm moving my cursor" && back[0][1] === 'Я веду курс
 ok(back[2][1] === '', 'строка без перевода переносится пустой');
 ok(SFL.parsePairs("I'm moving my cursor\nto the top") === null, 'обычный текст не принимается за текст с переводом');
 
-// 5. Строки с готовым переводом не перерезаются даже на узком экране
-const fixedSrc = "I'm moving my cursor to the top\nof the Logic Pro window";
-const narrow = SFL.split(fixedSrc, 300, measure, new Set(["I'm moving my cursor to the top", 'of the Logic Pro window']));
-ok(narrow.length === 2 && narrow[0] === "I'm moving my cursor to the top", 'строки с переводом остались целыми: ' + JSON.stringify(narrow));
-ok(SFL.split(fixedSrc, 300, measure, null).length > 2, 'обычный текст на узком экране режется как раньше');
-
+// 5. Куски с готовым переводом склеиваются по ширине и не переходят через конец предложения
+const units = ['Hello!', 'This is a test', 'of my voice prompter.', 'I am reading', 'out loud.'];
+const trU = { 'Hello!': 'Привет!', 'This is a test': 'Это проверка', 'of my voice prompter.': 'моего суфлёра.', 'I am reading': 'Я читаю', 'out loud.': 'вслух.' };
+const fx = new Set(units);
+let der = {};
+const wide = SFL.split(units.join('\n'), 2000, measure, fx, trU, der);
+console.log('мелкий шрифт ->', JSON.stringify(wide));
+ok(wide.length === 3 && wide[1] === 'This is a test of my voice prompter.', 'мелкий шрифт: куски одного предложения склеились');
+ok(wide[0] === 'Hello!', 'конец предложения не склеивается со следующим');
+ok(der['This is a test of my voice prompter.'] === 'Это проверка моего суфлёра.', 'перевод склеенной строки собран из кусков');
+der = {};
+const mid = SFL.split(units.join('\n'), 1000, measure, fx, trU, der);
+console.log('средний шрифт ->', JSON.stringify(mid));
+ok(mid.includes('This is a test') && mid.includes('of my voice prompter.'), 'средний шрифт: куски по одному в строке');
+der = {};
+const big = SFL.split(units.join('\n'), 350, measure, fx, trU, der);
+console.log('крупный шрифт ->', JSON.stringify(big), JSON.stringify(der));
+ok(big.every(l => measure(l) <= 350 || !l.includes(' ')), 'крупный шрифт: всё влезает в ширину');
+ok(big.join(' ') === units.join(' '), 'ни одно слово не потеряно и порядок тот же');
+const firstPart = big.find(l => 'of my voice prompter.'.startsWith(l) && l !== 'of my voice prompter.');
+ok(firstPart && der[firstPart] === 'моего суфлёра.', 'длинный кусок разрезан, перевод под первой частью');
 // 6. Переносы для чтения вслух: имена не рвутся, строка не кончается на артикль/предлог
 const w22 = s => s.length * 44;   // ~20 символов в строке
 const demo = SFL.split("I'm moving toward the middle section of the Dock and locating the Logic Pro icon. Now I'm clicking the icon to open Logic Pro.", 900, w22);

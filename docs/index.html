@@ -30,8 +30,8 @@
   --bad: #ff6159;
   --font-text: "Sofia Sans Semi Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
   --font-num: "JetBrains Mono", ui-monospace, Menlo, monospace;
-  --en: 96px;
-  --ru: 48px;
+  --en: 80px;
+  --ru: 40px;
 }
 [hidden] { display: none !important; }
 html { height: 100%; box-sizing: border-box; }
@@ -159,7 +159,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--said); o
       <button class="btn play" id="play" type="button" aria-label="Старт">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path id="playIcon" fill="currentColor" d="M7 4.5v15l13-7.5z"/></svg>
       </button>
-      <button class="btn" id="resetTimer" type="button" aria-label="Сбросить таймер" title="Сбросить таймер">
+      <button class="btn" id="resetTimer" type="button" aria-label="Заново: таймер и текст с начала" title="Заново: таймер и текст с начала">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg>
       </button>
     </div>
@@ -347,16 +347,60 @@ var SFL = (function () {
     return chunks;
   }
 
+  /* Куски с готовым переводом (из ссылки или из другой версии суфлёра) — смысловые фразы.
+     Склеиваем их в строки по ширине экрана: мельче шрифт — больше кусков в строке.
+     Рвём только на стыке кусков и никогда через конец предложения.
+     Перевод склеенной строки = переводы кусков подряд, кладём его в derived. */
+  var SENT_END = /[.!?…]["'”»)\]]?$/;
+  function packUnits(units, maxW, measure, tr, derived) {
+    var out = [], sent = [];
+    function addLine(parts) {
+      var en = parts.join(' ');
+      if (parts.length > 1 && tr && derived) {
+        var rus = parts.map(function (u) { return tr[u]; });
+        if (rus.every(function (r) { return r != null && r !== ''; })) derived[en] = rus.join(' ');
+      }
+      out.push(en);
+    }
+    function flushSentence() {
+      var line = [];
+      sent.forEach(function (u) {
+        if (measure(u) > maxW) {
+          // Кусок шире строки (очень крупный шрифт): режем по словам, перевод — под первой частью
+          if (line.length) { addLine(line); line = []; }
+          chunk(u, maxW, measure).forEach(function (p, k) {
+            out.push(p);
+            if (derived && p !== u) derived[p] = k === 0 && tr && tr[u] != null ? tr[u] : '';
+          });
+          return;
+        }
+        if (line.length && measure(line.concat(u).join(' ')) > maxW) { addLine(line); line = []; }
+        line.push(u);
+      });
+      if (line.length) addLine(line);
+      sent = [];
+    }
+    units.forEach(function (u) { sent.push(u); if (SENT_END.test(u)) flushSentence(); });
+    if (sent.length) flushSentence();
+    return out;
+  }
+
   // Весь текст → строки. Перенос строки в исходнике — всегда граница.
-  // fixed — строки, пришедшие с готовым переводом: их не режем, иначе перевод к ним не подойдёт.
-  function split(src, maxW, measure, fixed) {
-    var lines = [];
+  // fixed — куски с готовым переводом: их склеивает packUnits, остальной текст режет chunk.
+  function split(src, maxW, measure, fixed, tr, derived) {
+    var lines = [], run = [];
+    function flush() {
+      if (run.length) packUnits(run, maxW, measure, tr, derived).forEach(function (l) { lines.push(l); });
+      run = [];
+    }
     String(src).split('\n').forEach(function (para) {
       para = para.trim();
-      if (!para) return;
-      if (fixed && fixed.has(para)) { lines.push(para); return; }
+      if (!para) { flush(); return; }
+      if (fixed && fixed.has(para)) { run.push(para); return; }
+      flush();
       sentences(para).forEach(function (s) { chunk(s, maxW, measure).forEach(function (c) { lines.push(c); }); });
     });
+    flush();
     return lines;
   }
 
@@ -421,7 +465,7 @@ var SFL = (function () {
     return 'Суфлёр: текст с переводом\n' + lines.map(function (en) { return en + SEP + (tr[en] || ''); }).join('\n');
   }
 
-  return { norm: norm, same: same, clean: clean, sentences: sentences, chunk: chunk, split: split, Matcher: Matcher,
+  return { norm: norm, same: same, clean: clean, sentences: sentences, chunk: chunk, split: split, packUnits: packUnits, Matcher: Matcher,
     parsePairs: parsePairs, pairsText: pairsText };
 })();
 /* ====== PURE-END ====== */
@@ -459,11 +503,11 @@ var SFL = (function () {
 
   var S = {
     source: store.get('source', null),
-    enSize: store.get('enSize', 96),
+    enSize: store.get('enSize', 80),
     tr: store.get('tr', {}),
     fixed: new Set(store.get('fixed', [])),
     title: store.get('title', ''),
-    lines: [], words: [], byEn: new Map(),
+    lines: [], words: [], byEn: new Map(), derived: {},
     gp: 0, cur: 0, dimmed: [],
     lastSpeech: 0, ttsBusy: false, colW: 0
   };
@@ -505,7 +549,8 @@ var SFL = (function () {
     S.colW = textColumnWidth();
     var maxW = Math.max(80, S.colW - 8);
     var src = S.source == null ? DEMO_SRC : S.source;
-    var texts = SFL.split(src, maxW, measure, S.source == null ? null : S.fixed);
+    S.derived = {};
+    var texts = SFL.split(src, maxW, measure, S.source == null ? null : S.fixed, S.tr, S.derived);
 
     S.lines = []; S.words = []; S.byEn = new Map(); S.dimmed = [];
     var frag = document.createDocumentFragment();
@@ -545,8 +590,10 @@ var SFL = (function () {
     badge.classList.toggle('named', S.source != null);
   }
 
+  // Перевод строки: свой (из словаря) или собранный из переводов кусков
+  function trOf(en) { return S.tr[en] != null ? S.tr[en] : S.derived[en]; }
   function paintRu(ln) {
-    var ru = S.tr[ln.en];
+    var ru = trOf(ln.en);
     ln.ruEl.textContent = ru == null ? (T.busy ? '…' : '') : ru;
     ln.ruEl.classList.toggle('pending', ru == null);
   }
@@ -614,7 +661,7 @@ var SFL = (function () {
     listening: 'Слушаю',
     denied: 'Микрофон здесь недоступен. Касание экрана — следующая строка',
     unavailable: 'Голос здесь недоступен. Касание экрана — следующая строка',
-    stalled: 'Микрофон выключился',
+    stalled: 'Микрофон выключился. Коснитесь экрана — включу снова',
     busy: 'Микрофон занят, попробуйте через минуту',
     micoff: 'Safari не дал микрофон. Разрешите: Настройки → Safari → Микрофон, затем обновите страницу',
     siri: 'Распознавание речи выключено. Включите Siri и Диктовку в настройках iPad, затем обновите страницу'
@@ -653,44 +700,57 @@ var SFL = (function () {
     }
   }
   function voiceStop() {
-    V.want = false;
+    V.want = false; clearTimeout(V.watch);
     if (V.kind === 'dictation' && V.dict) V.dict.stop().catch(function () {});
     if (V.rec) { try { V.rec.stop(); } catch (e) {} }
     if (V.state !== 'denied' && V.state !== 'unavailable') setVoice('off');
   }
-  function startRec() {
-    if (!V.rec) {
-      var r = new SR();
-      r.lang = 'en-US'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
-      r.onstart = function () { M.used = 0; M.lastLen = 0; setVoice('listening'); };
-      r.onresult = function (e) {
-        var interim = '';
-        for (var i = e.resultIndex; i < e.results.length; i++) {
-          var res = e.results[i];
-          if (res.isFinal) onSpeech(res[0].transcript, true); else interim += res[0].transcript + ' ';
-        }
-        if (interim.trim()) onSpeech(interim, false);
-      };
-      r.onerror = function (e) {
-        if (e.error === 'not-allowed' || e.error === 'audio-capture') {
-          V.want = false; V.kind = null; setVoice(IN_CLAUDE ? 'denied' : 'micoff');
-        } else if (e.error === 'service-not-allowed') {
-          V.want = false; V.kind = null; setVoice(IN_CLAUDE ? 'denied' : 'siri');
-        }
-      };
-      r.onend = function () {
-        if (V.want) {
-          setTimeout(function () {
-            if (!V.want) return;
-            try { r.start(); } catch (err) { setVoice('stalled'); }
-          }, 250);
-        } else if (V.state === 'listening' || V.state === 'starting') setVoice('off');
-      };
-      V.rec = r;
-    }
-    setVoice('starting');
-    try { V.rec.start(); } catch (e) { /* уже слушает */ }
+  /* Распознавание речи браузера. Каждый запуск — новый сеанс: Safari на iPad плохо переиспользует
+     старый. Сеанс от старого запуска (r !== V.rec) больше ничего не меняет. */
+  function newRec() {
+    var r = new SR();
+    r.lang = 'en-US'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+    r.onstart = function () {
+      if (r !== V.rec) return;
+      V.started = true; clearTimeout(V.watch);
+      M.used = 0; M.lastLen = 0; setVoice('listening');
+    };
+    r.onresult = function (e) {
+      if (r !== V.rec) return;
+      var interim = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var res = e.results[i];
+        if (res.isFinal) onSpeech(res[0].transcript, true); else interim += res[0].transcript + ' ';
+      }
+      if (interim.trim()) onSpeech(interim, false);
+    };
+    r.onerror = function (e) {
+      if (r !== V.rec) return;
+      if (e.error === 'not-allowed' || e.error === 'audio-capture') {
+        V.want = false; V.kind = IN_CLAUDE ? null : V.kind; setVoice(IN_CLAUDE ? 'denied' : 'micoff');
+      } else if (e.error === 'service-not-allowed') {
+        V.want = false; setVoice(IN_CLAUDE ? 'denied' : 'siri');
+      }
+    };
+    r.onend = function () {
+      if (r !== V.rec) return;
+      // Safari сам закрывает сеанс после паузы в речи — продолжаем новым сеансом
+      if (V.want) setTimeout(function () { if (V.want && r === V.rec) restartRec(false); }, 200);
+      else if (V.state === 'listening' || V.state === 'starting') setVoice('off');
+    };
+    return r;
   }
+  function restartRec(fromGesture) {
+    var old = V.rec;
+    V.rec = newRec(); V.started = false;
+    if (old) { try { old.abort(); } catch (e) {} }
+    if (fromGesture) setVoice('starting');
+    // Сторож: если за 2,5 с сеанс не начался — честно говорим, что микрофон выключился
+    clearTimeout(V.watch);
+    V.watch = setTimeout(function () { if (V.want && !V.started) setVoice('stalled'); }, 2500);
+    try { V.rec.start(); } catch (e) { setVoice('stalled'); }
+  }
+  function startRec() { restartRec(true); }
 
   /* ---------- озвучка строки ---------- */
   var voicesEn = null;
@@ -728,7 +788,7 @@ var SFL = (function () {
   /* ---------- перевод: Claude, а вне Claude — Google, потом MyMemory ---------- */
   var T = { sample: null, tts: null, busy: false, err: null, granted: false };
   var BATCH = 40;
-  function missingCount() { var n = 0; S.byEn.forEach(function (_, en) { if (S.tr[en] == null) n++; }); return n; }
+  function missingCount() { var n = 0; S.byEn.forEach(function (_, en) { if (trOf(en) == null) n++; }); return n; }
   function applyTr(en, ru) {
     if (!ru) return;
     S.tr[en] = ru;
@@ -762,7 +822,7 @@ var SFL = (function () {
     var order = [], seen = new Set(), n = S.lines.length, k, i, en;
     for (k = 0; k < n; k++) {
       i = (S.cur + k) % n; en = S.lines[i].en;
-      if (S.tr[en] == null && !seen.has(en)) { seen.add(en); order.push(i); }
+      if (trOf(en) == null && !seen.has(en)) { seen.add(en); order.push(i); }
     }
     if (!order.length) { renderTr(); return; }
     var batches = [];
@@ -920,7 +980,9 @@ var SFL = (function () {
     setTimeout(function () { ta.focus(); ta.select(); try { ta.setSelectionRange(0, text.length); } catch (e) {} }, 50);
   }
   function exportPairs() {
-    var text = SFL.pairsText(S.lines.map(function (l) { return l.en; }), S.tr);
+    var map = {};
+    S.lines.forEach(function (l) { map[l.en] = trOf(l.en) || ''; });
+    var text = SFL.pairsText(S.lines.map(function (l) { return l.en; }), map);
     var miss = missingCount();
     var done = function () { note('Скопировано строк: ' + S.lines.length + (miss ? '. Без перевода: ' + miss : '') + '. Вставьте кнопкой «+ Текст» в другой версии.'); };
     try {
@@ -937,6 +999,8 @@ var SFL = (function () {
   $('#closeOut').onclick = function () { $('#outSheet').hidden = true; };
   $('#outSheet').addEventListener('click', function (e) { if (e.target.id === 'outSheet') $('#outSheet').hidden = true; });
   track.addEventListener('click', function (e) {
+    // Микрофон отвалился во время записи: касание экрана включает его снова (нужен жест пользователя)
+    if (TM.on && V.state === 'stalled') { voiceStart(); return; }
     var sayBtn = e.target.closest('.say');
     if (sayBtn) { speak(S.lines[+sayBtn.closest('.line').dataset.i].en, sayBtn); return; }
     var lineEl = e.target.closest('.line');
@@ -944,8 +1008,14 @@ var SFL = (function () {
     next();
   });
   $('#play').onclick = function () { if (TM.on) pause(); else play(); };
-  $('#resetTimer').onclick = function () { if (TM.on) pause(); TM.acc = 0; paintTimer(); };
-  $('#toStart').onclick = function () { gotoLine(0); };
+  // «Заново»: таймер на ноль, текст в начало; если запись шла — слушаем дальше новым сеансом
+  $('#resetTimer').onclick = function () {
+    TM.acc = 0; TM.t0 = performance.now();
+    gotoLine(0);
+    if (TM.on) voiceStart();
+    paintTimer(); tick();
+  };
+  $('#toStart').onclick = function () { gotoLine(0); if (TM.on) voiceStart(); };
   $('#prev').onclick = function () { gotoLine(S.cur - 1); };
   $('#next').onclick = function () { next(); };
   $('#smaller').onclick = function () { resize(S.enSize - 8); };
