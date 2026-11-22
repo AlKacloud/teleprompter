@@ -336,8 +336,11 @@ var SFL = (function () {
     if (chunks.length > 1) {
       var last = chunks[chunks.length - 1].split(' '), prev = chunks[chunks.length - 2].split(' ');
       if (last.length === 1 && prev.length >= 3) {
-        var moved = [prev[prev.length - 1]].concat(last).join(' ');
-        if (measure(moved) <= maxW) { chunks[chunks.length - 2] = prev.slice(0, -1).join(' '); chunks[chunks.length - 1] = moved; }
+        var take = 1;
+        // Если после переноса строка кончится на «its/the/to» — забираем и это слово тоже
+        if (TAILBAD.has(bare(prev[prev.length - 2])) && prev.length >= 4) take = 2;
+        var moved = prev.slice(prev.length - take).concat(last).join(' ');
+        if (measure(moved) <= maxW) { chunks[chunks.length - 2] = prev.slice(0, -take).join(' '); chunks[chunks.length - 1] = moved; }
       }
     }
     return chunks;
