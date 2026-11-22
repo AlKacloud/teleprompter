@@ -54,7 +54,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--said); o
 .say svg { width: 26px; height: 26px; }
 .say.on { color: var(--said); border-color: var(--said); }
 .txt { min-width: 0; }
-.en { font-size: var(--en); line-height: 1.05; font-weight: 600; color: var(--todo); overflow-wrap: anywhere; }
+.en { font-size: calc(var(--en) * var(--fit, 1)); line-height: 1.05; font-weight: 600; color: var(--todo); overflow-wrap: anywhere; }
 .en .w { transition: color .18s ease; }
 .en .w.said { color: var(--said); }
 .ru { font-size: var(--ru); line-height: 1.2; font-weight: 400; color: var(--ru-ink); margin-top: .16em; min-height: 1.2em; }
@@ -323,11 +323,13 @@ var SFL = (function () {
   }
 
   // Весь текст → строки. Перенос строки в исходнике — всегда граница.
-  function split(src, maxW, measure) {
+  // fixed — строки, пришедшие с готовым переводом: их не режем, иначе перевод к ним не подойдёт.
+  function split(src, maxW, measure, fixed) {
     var lines = [];
     String(src).split('\n').forEach(function (para) {
       para = para.trim();
       if (!para) return;
+      if (fixed && fixed.has(para)) { lines.push(para); return; }
       sentences(para).forEach(function (s) { chunk(s, maxW, measure).forEach(function (c) { lines.push(c); }); });
     });
     return lines;
@@ -434,6 +436,7 @@ var SFL = (function () {
     source: store.get('source', null),
     enSize: store.get('enSize', 96),
     tr: store.get('tr', {}),
+    fixed: new Set(store.get('fixed', [])),
     lines: [], words: [], byEn: new Map(),
     gp: 0, cur: 0, dimmed: [],
     lastSpeech: 0, ttsBusy: false, colW: 0
@@ -476,7 +479,7 @@ var SFL = (function () {
     S.colW = textColumnWidth();
     var maxW = Math.max(80, S.colW - 8);
     var src = S.source == null ? DEMO_SRC : S.source;
-    var texts = SFL.split(src, maxW, measure);
+    var texts = SFL.split(src, maxW, measure, S.source == null ? null : S.fixed);
 
     S.lines = []; S.words = []; S.byEn = new Map(); S.dimmed = [];
     var frag = document.createDocumentFragment();
@@ -484,6 +487,9 @@ var SFL = (function () {
       var toks = en.split(' ');
       var ln = { en: en, toks: toks, start: S.words.length, end: S.words.length + toks.length, el: null, ruEl: null };
       var el = document.createElement('div'); el.className = 'line'; el.dataset.i = i;
+      // Строка с готовым переводом шире экрана: чуть уменьшаем шрифт только ей
+      var w = measure(en);
+      if (w > maxW) el.style.setProperty('--fit', Math.max(0.5, maxW / w).toFixed(3));
       var say = document.createElement('button'); say.className = 'say'; say.type = 'button'; say.setAttribute('aria-label', 'Прослушать строку');
       say.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
       var tx = document.createElement('div'); tx.className = 'txt';
@@ -854,7 +860,12 @@ var SFL = (function () {
     var t = pairs ? pairs.map(function (p) { return p[0]; }).join('\n') : SFL.clean(raw);
     if (!t) { closeSheet(); return; }
     // Текст из другой версии суфлёра приходит с готовым переводом
-    if (pairs) { pairs.forEach(function (p) { if (p[1]) S.tr[p[0]] = p[1]; }); saveTr(); }
+    if (!append) S.fixed = new Set();
+    if (pairs) {
+      pairs.forEach(function (p) { S.fixed.add(p[0]); if (p[1]) S.tr[p[0]] = p[1]; });
+      saveTr();
+    }
+    store.set('fixed', Array.from(S.fixed));
     var keepGp = append ? S.gp : 0;
     S.source = append && S.source ? S.source + '\n' + t : t;
     store.set('source', S.source);

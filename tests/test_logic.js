@@ -59,5 +59,11 @@ ok(back && back.length === 3, 'все 3 строки вернулись, заг�
 ok(back[0][0] === "I'm moving my cursor" && back[0][1] === 'Я веду курсор', 'английский и русский на месте');
 ok(back[2][1] === '', 'строка без перевода переносится пустой');
 ok(SFL.parsePairs("I'm moving my cursor\nto the top") === null, 'обычный текст не принимается за текст с переводом');
+
+// 5. Строки с готовым переводом не перерезаются даже на узком экране
+const fixedSrc = "I'm moving my cursor to the top\nof the Logic Pro window";
+const narrow = SFL.split(fixedSrc, 300, measure, new Set(["I'm moving my cursor to the top", 'of the Logic Pro window']));
+ok(narrow.length === 2 && narrow[0] === "I'm moving my cursor to the top", 'строки с переводом остались целыми: ' + JSON.stringify(narrow));
+ok(SFL.split(fixedSrc, 300, measure, null).length > 2, 'обычный текст на узком экране режется как раньше');
 console.log(fails ? `\n${fails} проверок не прошло` : '\nВсе проверки прошли');
 process.exit(fails ? 1 : 0);
