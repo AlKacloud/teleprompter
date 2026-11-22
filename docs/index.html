@@ -112,6 +112,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--said); o
 .foot .pos { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--todo); }
 .badge { align-self: flex-start; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--warn); border: 1px solid #5a4422; border-radius: 6px; padding: 2px 6px; }
 .trbtn { min-height: 40px; font-size: 15px; }
+.badge.named { text-transform: none; letter-spacing: 0; font-size: 14px; line-height: 1.25; color: var(--said); border-color: #2f4a3b; }
 @keyframes pulse { 50% { opacity: .35; } }
 
 /* ---------- окно текста ---------- */
@@ -461,6 +462,7 @@ var SFL = (function () {
     enSize: store.get('enSize', 96),
     tr: store.get('tr', {}),
     fixed: new Set(store.get('fixed', [])),
+    title: store.get('title', ''),
     lines: [], words: [], byEn: new Map(),
     gp: 0, cur: 0, dimmed: [],
     lastSpeech: 0, ttsBusy: false, colW: 0
@@ -536,7 +538,11 @@ var SFL = (function () {
     });
     track.replaceChildren(frag);
     M = new SFL.Matcher(S.words.map(function (w) { return w.key; }));
-    $('#demoBadge').hidden = S.source != null;
+    // Подпись в панели: «Пример» или название сценария из ссылки
+    var badge = $('#demoBadge');
+    badge.hidden = S.source != null && !S.title;
+    badge.textContent = S.source == null ? 'Пример' : S.title;
+    badge.classList.toggle('named', S.source != null);
   }
 
   function paintRu(ln) {
@@ -887,7 +893,7 @@ var SFL = (function () {
     var t = pairs ? pairs.map(function (p) { return p[0]; }).join('\n') : SFL.clean(raw);
     if (!t) { closeSheet(); return; }
     // Текст из другой версии суфлёра приходит с готовым переводом
-    if (!append) S.fixed = new Set();
+    if (!append) { S.fixed = new Set(); S.title = ''; store.set('title', ''); }
     if (pairs) {
       pairs.forEach(function (p) { S.fixed.add(p[0]); if (p[1]) S.tr[p[0]] = p[1]; });
       saveTr();
@@ -904,9 +910,9 @@ var SFL = (function () {
 
   /* ---------- перенос текста с переводом в другую версию ---------- */
   var noteTimer = 0;
-  function note(msg) {
+  function note(msg, ms) {
     var n = $('#note'); n.textContent = msg;
-    clearTimeout(noteTimer); noteTimer = setTimeout(function () { n.textContent = ''; }, 6000);
+    clearTimeout(noteTimer); noteTimer = setTimeout(function () { n.textContent = ''; }, ms || 6000);
   }
   function showOut(text) {
     $('#outSheet').hidden = false;
@@ -1040,6 +1046,7 @@ var SFL = (function () {
     pairs.forEach(function (p) { if (p[1]) S.tr[String(p[0]).trim()] = String(p[1]).trim(); });
     store.set('source', S.source); store.set('fixed', Array.from(S.fixed)); store.set('tr', S.tr);
     store.set('pos', null); store.set('link', link.key);
+    S.title = String(link.data.title || '').slice(0, 80); store.set('title', S.title);
     TM.acc = 0;
     return true;
   }
@@ -1053,7 +1060,7 @@ var SFL = (function () {
       var fresh = applyLinkScript(link);
       if (link) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
       start();
-      if (fresh) note('Сценарий загружен: ' + S.lines.length + ' строк. Нажмите ▶ и читайте.');
+      if (fresh) note('Сценарий загружен: ' + S.lines.length + ' строк. Нажмите ▶ и читайте.', 20000);
       else if (link && link.error) note('Сценарий из ссылки не прочитался. Обновите iPadOS или откройте ссылку в Safari.');
     });
 
