@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Суфлёр звонка</title>
+<style>
+:root{--bg:#f3f5fa;--surface:#ffffff;--them:#e6ebf5;--reply:#dcf1e6;--fg:#131a26;--muted:#5a6477;--accent:#2d6bd9;--line:#d3d9e5;--err:#bf3328;--ok:#1f8a4c;--on-accent:#ffffff;color-scheme:light}
+@media (prefers-color-scheme: dark){:root{--bg:#0d1119;--surface:#151b26;--them:#1d2534;--reply:#133026;--fg:#e7ebf3;--muted:#8c96aa;--accent:#5a91ff;--line:#283143;--err:#ff7a6d;--ok:#4cc985;--on-accent:#0d1119;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.45 -apple-system,system-ui,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.pad{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.bar{padding-block:10px;background:var(--surface);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.bar h1{font-size:19px;margin:0;flex:1}
+select,button,input{font:inherit;color:var(--fg)}
+select,input{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+#key{flex:1;min-width:0}
+.keyrow{display:flex;gap:8px;width:100%}
+.btn{border:none;border-radius:12px;padding:10px 16px;background:var(--accent);color:var(--on-accent);font-weight:600;cursor:pointer}
+.btn.stop{background:var(--err)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer}
+#status{font-size:14px;color:var(--muted);width:100%}
+#status.live{color:var(--ok)}
+#status.warn{color:var(--err)}
+#chat{flex:1;overflow-y:auto;padding-block:14px;display:flex;flex-direction:column;gap:16px}
+.turn{display:flex;flex-direction:column;gap:6px;min-width:0}
+.them{align-self:flex-start;max-width:min(700px,92%);background:var(--them);border-radius:16px 16px 16px 4px;padding:10px 14px}
+.en{font-weight:600;overflow-wrap:anywhere}
+.ru{color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.err{color:var(--err);font-size:14px}
+.reply{align-self:flex-end;max-width:min(700px,92%);text-align:left;background:var(--reply);border:none;border-radius:16px 16px 4px 16px;padding:10px 14px;cursor:pointer;overflow-wrap:anywhere}
+.reply small{display:block;color:var(--muted);font-size:14px;margin-top:3px}
+.wait{align-self:flex-end;color:var(--muted);font-size:14px}
+#live{color:var(--muted);font-style:italic;min-height:1.3em;overflow-wrap:anywhere}
+.hint{color:var(--muted);font-size:15px}
+#toast{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header class="bar pad">
+  <h1>Суфлёр звонка</h1>
+  <select id="style" aria-label="Стиль ответов">
+    <option value="simple">Простой English</option>
+    <option value="conv" selected>Разговорный</option>
+    <option value="slang">Со сленгом</option>
+  </select>
+  <button class="btn" id="btn" type="button">▶ Слушать</button>
+  <div class="keyrow" id="keyrow">
+    <input id="key" type="password" placeholder="Ключ Anthropic (sk-ant-…) — для вариантов ответа" autocomplete="off">
+    <button class="ghost" id="saveKey" type="button">Сохранить</button>
+  </div>
+  <div id="status">Нажмите «Слушать». Перевод работает и без ключа, варианты ответа — с ключом.</div>
+</header>
+<main id="chat" class="pad">
+  <div class="hint" id="hint">Включите громкую связь, положите iPad рядом и нажмите «Слушать». Фразы собеседника появятся здесь сами.</div>
+  <div id="live"></div>
+</main>
+<div id="toast" role="status"></div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var chat = $('chat'), live = $('live'), btn = $('btn'), statusEl = $('status');
+  var STYLES = {
+    simple: 'Simple everyday English, intermediate level (B1-B2). Short clear sentences, common words, contractions. Sounds like a comfortable non-native speaker.',
+    conv: 'Relaxed natural spoken English, intermediate level. Occasional natural fillers (yeah, well, honestly, sure, no worries). Short sentences.',
+    slang: 'Casual spoken English with light slang (gonna, kinda, for sure, no biggie, sounds good, gotcha). Still easy, intermediate level.'
+  };
+  var KEY = 'call_suflyor_key';
+  var history = [];
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function setStatus(t, kind) { statusEl.textContent = t; statusEl.className = kind || ''; }
+  function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+  function toast(t) {
+    var e = $('toast'); e.textContent = t; e.classList.add('show');
+    clearTimeout(toast.t); toast.t = setTimeout(function () { e.classList.remove('show'); }, 1300);
+  }
+  function copyText(t) {
+    try { navigator.clipboard.writeText(t).then(function () { toast('Скопировано'); }, function () { toast('Не скопировалось'); }); }
+    catch (e) { toast('Не скопировалось'); }
+  }
+  function getKey() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+  function showKeyRow() { $('keyrow').hidden = !!getKey(); }
+  $('saveKey').onclick = function () {
+    var v = $('key').value.trim(); if (!v) return;
+    try { localStorage.setItem(KEY, v); } catch (e) {}
+    $('key').value = ''; showKeyRow(); toast('Ключ сохранён на этом iPad');
+  };
+  showKeyRow();
+
+  /* ---------- распознавание речи Safari (логика из суфлёра чтения) ---------- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var V = { rec: null, want: false, live: false, started: false, watch: null };
+  if (!SR) setStatus('Этот браузер не распознаёт речь. Откройте страницу в Safari на iPad.', 'warn');
+
+  function newRec() {
+    var r = new SR();
+    r.lang = 'en-US'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+    r.onstart = function () {
+      if (r !== V.rec) return;
+      V.started = true; V.live = true; V.skipFinal = false; clearTimeout(V.watch);
+      setStatus('Слушаю', 'live');
+    };
+    r.onresult = function (e) {
+      if (r !== V.rec) return;
+      var interim = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var res = e.results[i];
+        if (res.isFinal) { var t = res[0].transcript.trim(); if (t && !V.skipFinal) heard(t); }
+        else interim += res[0].transcript + ' ';
+      }
+      live.textContent = interim.trim() ? '🎧 ' + interim.trim() : '';
+      armFlush(interim.trim());
+    };
+    r.onerror = function (e) {
+      if (r !== V.rec) return;
+      if (e.error === 'not-allowed' || e.error === 'audio-capture') {
+        V.want = false; uiOff(); setStatus('Safari не дал микрофон. Настройки → Safari → Микрофон → Разрешить, затем обновите страницу.', 'warn');
+      } else if (e.error === 'service-not-allowed') {
+        V.want = false; uiOff(); setStatus('Распознавание выключено. Включите Siri и Диктовку в настройках iPad, затем обновите страницу.', 'warn');
+      }
+    };
+    r.onend = function () {
+      if (r !== V.rec) return;
+      V.live = false;
+      // Safari закрывает сеанс после паузы — сразу открываем новый
+      if (V.want) setTimeout(function () { if (V.want && r === V.rec) restartRec(); }, 200);
+    };
+    return r;
+  }
+  function restartRec() {
+    var old = V.rec;
+    if (old && V.live) {
+      try { old.stop(); } catch (e) {}
+      setTimeout(function () { if (V.want && V.rec === old && V.live) { V.live = false; restartRec(); } }, 1200);
+      return;
+    }
+    V.rec = newRec(); V.started = false; V.live = false;
+    if (old) { try { old.abort(); } catch (e) {} }
+    clearTimeout(V.watch);
+    V.watch = setTimeout(function () {
+      if (V.want && !V.started) setStatus('Микрофон выключился. Коснитесь экрана — включу снова.', 'warn');
+    }, 2500);
+    try { V.rec.start(); } catch (e) {}
+  }
+  function uiOff() { btn.textContent = '▶ Слушать'; btn.classList.remove('stop'); live.textContent = ''; }
+  btn.onclick = function () {
+    if (!SR) return;
+    if (V.want) {
+      V.want = false; clearTimeout(V.watch);
+      if (V.rec) { try { V.rec.stop(); } catch (e) {} }
+      uiOff(); setStatus('Остановлено');
+      return;
+    }
+    V.want = true; btn.textContent = '■ Стоп'; btn.classList.add('stop');
+    setStatus('Включаю микрофон…');
+    var h = $('hint'); if (h) h.remove();
+    restartRec();
+    try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(function () {}); } catch (e) {}
+  };
+  // Если Safari не дал перезапуститься сам — касание экрана включает снова
+  document.addEventListener('pointerdown', function (e) {
+    if (e.target === btn) return;
+    if (V.want && !V.live) restartRec();
+  });
+
+  /* Safari на iPad иногда долго не отдаёт «финальный» результат:
+     если промежуточный текст не меняется 1,6 с — считаем фразу законченной. */
+  var flushT = null, pending = '';
+  function armFlush(interim) {
+    pending = interim; clearTimeout(flushT);
+    if (!interim) return;
+    flushT = setTimeout(function () {
+      if (!pending) return;
+      var t = pending; pending = ''; live.textContent = '';
+      V.skipFinal = true; // этот сеанс уже отдал фразу — его финальный результат не нужен
+      if (V.rec && V.live) { try { V.rec.stop(); } catch (e) {} }
+      heard(t);
+    }, 1600);
+  }
+  var lastHeard = '';
+  function heard(t) {
+    clearTimeout(flushT); pending = ''; live.textContent = '';
+    if (t === lastHeard) return;
+    lastHeard = t;
+    addTurn(t);
+  }
+
+  /* ---------- перевод (Google, без ключа) и варианты ответа (Claude, с ключом) ---------- */
+  function translateRu(en) {
+    return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=' + encodeURIComponent(en))
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function (d) { return (d[0] || []).map(function (x) { return x[0]; }).join(''); })
+      .catch(function () {
+        return fetch('https://api.mymemory.translated.net/get?langpair=en|ru&q=' + encodeURIComponent(en))
+          .then(function (r) { return r.json(); })
+          .then(function (d) { return (d.responseData && d.responseData.translatedText) || ''; });
+      });
+  }
+  function suggest(text, ctx) {
+    var key = getKey();
+    if (!key) return Promise.resolve(null);
+    var prompt = 'You help a Russian speaker during a live conversation with an English speaker.\n'
+      + (ctx ? 'Earlier lines from the other person:\n' + ctx + '\n\n' : '')
+      + 'LAST line from the other person: "' + text + '"\n'
+      + '(It comes from speech recognition and may have small errors; guess the intended meaning.)\n\n'
+      + 'Suggest 2 things the Russian speaker could say next in reply. Style: ' + STYLES[$('style').value] + '\n'
+      + 'Each reply: 1-2 short sentences, easy to say out loud.\n'
+      + 'Reply with only JSON: [{"en":"...","ru":"..."},{"en":"...","ru":"..."}]';
+    return fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-5-5',
+        max_tokens: 400,
+        output_config: { effort: 'low' },
+        messages: [{ role: 'user', content: prompt }]
+      })
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d && d.error && d.error.message) || ('HTTP ' + r.status));
+        var txt = (d.content || []).filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
+        return JSON.parse(txt.slice(txt.indexOf('['), txt.lastIndexOf(']') + 1));
+      });
+    });
+  }
+
+  function addTurn(text) {
+    var turn = el('div', 'turn');
+    var them = el('div', 'them');
+    var ru = el('div', 'ru', 'перевожу…');
+    them.appendChild(el('div', 'en', text)); them.appendChild(ru);
+    turn.appendChild(them);
+    var wait = getKey() ? el('div', 'wait', 'подбираю ответ…') : null;
+    if (wait) turn.appendChild(wait);
+    chat.insertBefore(turn, live);
+    scrollDown();
+
+    var ctx = history.slice(-6).map(function (h) { return '- ' + h; }).join('\n');
+    history.push(text);
+
+    translateRu(text).then(function (t) { ru.textContent = t || '(перевод не пришёл)'; }, function () {
+      ru.textContent = '(перевод не пришёл)';
+    });
+    suggest(text, ctx).then(function (reps) {
+      if (wait) wait.remove();
+      (Array.isArray(reps) ? reps.slice(0, 3) : []).forEach(function (r) {
+        var en = String((r && r.en) || ''); if (!en) return;
+        var b = el('button', 'reply', en); b.type = 'button';
+        b.appendChild(el('small', '', String((r && r.ru) || '')));
+        b.onclick = function () { copyText(en); };
+        turn.appendChild(b);
+      });
+      scrollDown();
+    }, function (e) {
+      if (wait) wait.remove();
+      turn.appendChild(el('div', 'err', 'Варианты ответа: ' + (e && e.message ? e.message : 'ошибка связи')));
+      if (e && /api.key|authentication|invalid x-api-key/i.test(e.message || '')) {
+        try { localStorage.removeItem(KEY); } catch (x) {}
+        showKeyRow();
+      }
+      scrollDown();
+    });
+  }
+})();
+</script>
+</body>
+</html>
