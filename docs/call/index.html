@@ -196,15 +196,19 @@ select,input{background:var(--bg);border:1px solid var(--line);border-radius:10p
   }
 
   /* ---------- перевод (Google, без ключа) и варианты ответа (Claude, с ключом) ---------- */
+  var CYR = /[а-яё]/i;
+  function isRu(t) { return !!t && CYR.test(t); }
+  // Бесплатные переводчики иногда возвращают текст без перевода — такой ответ не принимаем
   function translateRu(en) {
     return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=' + encodeURIComponent(en))
       .then(function (r) { if (!r.ok) throw 0; return r.json(); })
-      .then(function (d) { return (d[0] || []).map(function (x) { return x[0]; }).join(''); })
+      .then(function (d) { var t = (d[0] || []).map(function (x) { return x[0]; }).join(''); if (!isRu(t)) throw 0; return t; })
       .catch(function () {
         return fetch('https://api.mymemory.translated.net/get?langpair=en|ru&q=' + encodeURIComponent(en))
           .then(function (r) { return r.json(); })
-          .then(function (d) { return (d.responseData && d.responseData.translatedText) || ''; });
-      });
+          .then(function (d) { var t = (d && d.responseData && d.responseData.translatedText) || ''; if (!isRu(t)) throw 0; return t; });
+      })
+      .catch(function () { return ''; });
   }
   function suggest(text, ctx) {
     var key = getKey();
@@ -213,9 +217,10 @@ select,input{background:var(--bg);border:1px solid var(--line);border-radius:10p
       + (ctx ? 'Earlier lines from the other person:\n' + ctx + '\n\n' : '')
       + 'LAST line from the other person: "' + text + '"\n'
       + '(It comes from speech recognition and may have small errors; guess the intended meaning.)\n\n'
-      + 'Suggest 2 things the Russian speaker could say next in reply. Style: ' + STYLES[$('style').value] + '\n'
+      + '1) Translate the LAST line into natural Russian.\n'
+      + '2) Suggest 2 things the Russian speaker could say next in reply. Style: ' + STYLES[$('style').value] + '\n'
       + 'Each reply: 1-2 short sentences, easy to say out loud.\n'
-      + 'Reply with only JSON: [{"en":"...","ru":"..."},{"en":"...","ru":"..."}]';
+      + 'Reply with only JSON: {"ru":"...","replies":[{"en":"...","ru":"..."},{"en":"...","ru":"..."}]}';
     return fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -234,7 +239,7 @@ select,input{background:var(--bg);border:1px solid var(--line);border-radius:10p
       return r.json().then(function (d) {
         if (!r.ok) throw new Error((d && d.error && d.error.message) || ('HTTP ' + r.status));
         var txt = (d.content || []).filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
-        return JSON.parse(txt.slice(txt.indexOf('['), txt.lastIndexOf(']') + 1));
+        return JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
       });
     });
   }
@@ -253,12 +258,19 @@ select,input{background:var(--bg);border:1px solid var(--line);border-radius:10p
     var ctx = history.slice(-6).map(function (h) { return '- ' + h; }).join('\n');
     history.push(text);
 
-    translateRu(text).then(function (t) { ru.textContent = t || '(перевод не пришёл)'; }, function () {
-      ru.textContent = '(перевод не пришёл)';
+    var gotRu = false, claudeDone = false;
+    translateRu(text).then(function (t) {
+      if (isRu(t)) { gotRu = true; ru.textContent = t; }
+      else if (!getKey()) ru.textContent = '(перевод не пришёл — вставьте ключ Anthropic сверху, тогда переведёт Claude)';
+      else if (claudeDone) ru.textContent = '(перевод не пришёл)';
     });
-    suggest(text, ctx).then(function (reps) {
+    suggest(text, ctx).then(function (out) {
+      claudeDone = true;
       if (wait) wait.remove();
-      (Array.isArray(reps) ? reps.slice(0, 3) : []).forEach(function (r) {
+      if (out && !gotRu && isRu(out.ru)) { gotRu = true; ru.textContent = String(out.ru); }
+      if (!gotRu && ru.textContent === 'перевожу…') ru.textContent = '(перевод не пришёл)';
+      var reps = out && Array.isArray(out.replies) ? out.replies : [];
+      reps.slice(0, 3).forEach(function (r) {
         var en = String((r && r.en) || ''); if (!en) return;
         var b = el('button', 'reply', en); b.type = 'button';
         b.appendChild(el('small', '', String((r && r.ru) || '')));
@@ -267,7 +279,9 @@ select,input{background:var(--bg);border:1px solid var(--line);border-radius:10p
       });
       scrollDown();
     }, function (e) {
+      claudeDone = true;
       if (wait) wait.remove();
+      if (!gotRu && ru.textContent === 'перевожу…') ru.textContent = '(перевод не пришёл)';
       turn.appendChild(el('div', 'err', 'Варианты ответа: ' + (e && e.message ? e.message : 'ошибка связи')));
       if (e && /api.key|authentication|invalid x-api-key/i.test(e.message || '')) {
         try { localStorage.removeItem(KEY); } catch (x) {}
